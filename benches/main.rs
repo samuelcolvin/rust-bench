@@ -4,7 +4,7 @@ extern crate test;
 extern crate core;
 
 use test::{black_box, Bencher};
-use pyo3::{AsPyPointer, ToBorrowedObject};
+use pyo3::{AsPyPointer, intern, ToBorrowedObject};
 use pyo3::ffi;
 use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyDict, PyList, PySet, PyString};
@@ -269,3 +269,64 @@ fn isinstance_bool_type_is(bench: &mut Bencher) {
     });
 }
 
+fn run_startswith_py(items: &PyList) -> PyResult<i32> {
+    let mut count = 0;
+    let startswith_pys = intern!(items.py(), "startswith");
+    let underscore_pys = intern!(items.py(), "_");
+    for item in items.iter() {
+        let startswith_func =  item.cast_as::<PyString>()?.getattr(startswith_pys)?;
+        if startswith_func.call1((underscore_pys,))?.is_true()? {
+            count += 1;
+        }
+    }
+    Ok(count)
+}
+
+#[bench]
+fn startswith_py(bench: &mut Bencher) {
+    let gil = Python::acquire_gil();
+    let py = gil.python();
+    let items: Vec<PyObject> = (0..100).map(|i| {
+        if i % 2 == 0 {
+            i.to_string().to_object(py)
+        } else {
+            format!("_{}", i).to_object(py)
+        }
+    }).collect();
+    let py_list = PyList::new(py, &items);
+    assert_eq!(run_startswith_py(py_list).unwrap(), 50);
+
+    bench.iter(|| {
+        black_box(run_startswith_py(py_list).unwrap());
+    });
+}
+
+fn run_startswith_rust(items: &PyList) -> PyResult<i32> {
+    let mut count = 0;
+    for item in items.iter() {
+        let item_cow = item.cast_as::<PyString>()?.to_string_lossy();
+        if item_cow.as_ref().starts_with('_') {
+            count += 1;
+        }
+    }
+    Ok(count)
+}
+
+#[bench]
+fn startswith_rust(bench: &mut Bencher) {
+    let gil = Python::acquire_gil();
+    let py = gil.python();
+    let items: Vec<PyObject> = (0..100).map(|i| {
+        if i % 2 == 0 {
+            i.to_string().to_object(py)
+        } else {
+            format!("_{}", i).to_object(py)
+        }
+    }).collect();
+    let py_list = PyList::new(py, &items);
+    assert_eq!(run_startswith_rust(py_list).unwrap(), 50);
+
+    bench.iter(|| {
+        black_box(run_startswith_rust(py_list).unwrap());
+    });
+}
