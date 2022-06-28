@@ -1,14 +1,20 @@
 #![feature(test)]
 
-extern crate test;
 extern crate core;
+extern crate test;
 
-use test::{black_box, Bencher};
-use pyo3::{AsPyPointer, intern, ToBorrowedObject};
+use std::collections::{BTreeSet, HashSet};
+use std::hash::BuildHasherDefault;
+
 use pyo3::ffi;
 use pyo3::prelude::*;
-use pyo3::types::{PyBool, PyDict, PyList, PySet, PyString};
 use pyo3::type_object::PyTypeObject;
+use pyo3::types::{PyBool, PyDict, PyList, PySet, PyString};
+use pyo3::{intern, AsPyPointer, ToBorrowedObject};
+use test::{black_box, Bencher};
+
+use ahash::AHashSet;
+use nohash_hasher::NoHashHasher;
 
 fn run_dict_simple(py: Python) -> PyResult<PyObject> {
     let dict = PyDict::new(py);
@@ -17,7 +23,6 @@ fn run_dict_simple(py: Python) -> PyResult<PyObject> {
     }
     Ok(dict.into_py(py))
 }
-
 
 #[bench]
 fn dict_simple(bench: &mut Bencher) {
@@ -71,7 +76,9 @@ fn dict_reuse_str(bench: &mut Bencher) {
     let gil = Python::acquire_gil();
     let py = gil.python();
 
-    let keys: Vec<&PyString> = (0..100).map(|i| PyString::new(py, &i.to_string())).collect();
+    let keys: Vec<&PyString> = (0..100)
+        .map(|i| PyString::new(py, &i.to_string()))
+        .collect();
 
     bench.iter(|| {
         black_box(run_dict_reuse_str(py, &keys).unwrap());
@@ -85,7 +92,10 @@ fn run_dict_reuse_known_hash(py: Python, keys: &Vec<(&PyString, isize)>) -> PyRe
         let value = i;
         let key_ptr = key.as_ptr();
         value.with_borrowed_ptr(py, |value| unsafe {
-            error_on_minusone(py, ffi::_PyDict_SetItem_KnownHash(dict.as_ptr(), key_ptr, value, hash))
+            error_on_minusone(
+                py,
+                ffi::_PyDict_SetItem_KnownHash(dict.as_ptr(), key_ptr, value, hash),
+            )
         })?
     }
     Ok(dict.into_py(py))
@@ -96,11 +106,13 @@ fn dict_reuse_known_hash(bench: &mut Bencher) {
     let gil = Python::acquire_gil();
     let py = gil.python();
 
-    let keys: Vec<(&PyString, isize)> = (0..100).map(|i| {
-        let s = PyString::new(py, &i.to_string());
-        let hash = s.hash().unwrap();
-        (s, hash)
-    }).collect();
+    let keys: Vec<(&PyString, isize)> = (0..100)
+        .map(|i| {
+            let s = PyString::new(py, &i.to_string());
+            let hash = s.hash().unwrap();
+            (s, hash)
+        })
+        .collect();
 
     bench.iter(|| {
         black_box(run_dict_reuse_known_hash(py, &keys).unwrap());
@@ -115,7 +127,10 @@ fn run_dict_known_hash(py: Python) -> PyResult<PyObject> {
         let hash = i as isize;
         let key_ptr = key.into_py(py).as_ptr();
         value.with_borrowed_ptr(py, |value| unsafe {
-            error_on_minusone(py, ffi::_PyDict_SetItem_KnownHash(dict.as_ptr(), key_ptr, value, hash))
+            error_on_minusone(
+                py,
+                ffi::_PyDict_SetItem_KnownHash(dict.as_ptr(), key_ptr, value, hash),
+            )
         })?
     }
     Ok(dict.into_py(py))
@@ -146,7 +161,6 @@ fn run_set_simple(py: Python) -> PyResult<PyObject> {
     Ok(set.into_py(py))
 }
 
-
 #[bench]
 fn set_simple(bench: &mut Bencher) {
     let gil = Python::acquire_gil();
@@ -156,7 +170,6 @@ fn set_simple(bench: &mut Bencher) {
         black_box(run_set_simple(py).unwrap());
     });
 }
-
 
 fn run_set_vec(py: Python, keys: &Vec<&PyString>) -> PyResult<PyObject> {
     let mut vec: Vec<&PyString> = Vec::with_capacity(100);
@@ -168,15 +181,96 @@ fn run_set_vec(py: Python, keys: &Vec<&PyString>) -> PyResult<PyObject> {
     Ok(set.into_py(py))
 }
 
-
 #[bench]
 fn set_vec(bench: &mut Bencher) {
     let gil = Python::acquire_gil();
     let py = gil.python();
-    let keys: Vec<&PyString> = (0..100).map(|i| PyString::intern(py, &i.to_string())).collect();
+    let keys: Vec<&PyString> = (0..100)
+        .map(|i| PyString::intern(py, &i.to_string()))
+        .collect();
 
     bench.iter(|| {
         black_box(run_set_vec(py, &keys).unwrap());
+    });
+}
+
+fn run_set_vec2(py: Python, keys: &Vec<Py<PyString>>) -> PyResult<PyObject> {
+    let mut vec: Vec<Py<PyString>> = Vec::with_capacity(100);
+    for i in 0..100 {
+        let key = &keys[i];
+        vec.push(key.clone_ref(py));
+    }
+    let set = PySet::new(py, &vec)?;
+    Ok(set.into_py(py))
+}
+
+#[bench]
+fn set_vec2(bench: &mut Bencher) {
+    let gil = Python::acquire_gil();
+    let py = gil.python();
+    let keys: Vec<Py<PyString>> = (0..100)
+        .map(|i| PyString::intern(py, &i.to_string()).into_py(py))
+        .collect();
+
+    bench.iter(|| {
+        black_box(run_set_vec2(py, &keys).unwrap());
+    });
+}
+
+fn run_hashset_simple(checks: &[String]) -> i32 {
+    let mut set: HashSet<String> = HashSet::with_capacity(100);
+    for i in 0..100 {
+        set.insert(i.to_string());
+    }
+    let mut count = 0;
+    for i in checks {
+        if set.contains(i) {
+            count += 1;
+        }
+    }
+    count
+}
+
+#[bench]
+fn hashset_simple(bench: &mut Bencher) {
+    let checks: Vec<String> = vec![
+        "1".to_string(),
+        "50".to_string(),
+        "51".to_string(),
+        "99".to_string(),
+        "100".to_string(),
+    ];
+    bench.iter(|| {
+        black_box(run_hashset_simple(&checks));
+    });
+}
+
+fn run_hashset_vec(checks: &[String]) -> i32 {
+    let mut vec: Vec<String> = Vec::with_capacity(100);
+    for i in 0..100 {
+        vec.push(i.to_string());
+    }
+    let set: HashSet<String> = HashSet::from_iter(vec);
+    let mut count = 0;
+    for i in checks {
+        if set.contains(i) {
+            count += 1;
+        }
+    }
+    count
+}
+
+#[bench]
+fn hashset_vec(bench: &mut Bencher) {
+    let checks: Vec<String> = vec![
+        "1".to_string(),
+        "50".to_string(),
+        "51".to_string(),
+        "99".to_string(),
+        "100".to_string(),
+    ];
+    bench.iter(|| {
+        black_box(run_hashset_vec(&checks));
     });
 }
 
@@ -194,13 +288,15 @@ fn run_isinstance_bool_extract(items: &PyList) -> i32 {
 fn isinstance_bool_extract(bench: &mut Bencher) {
     let gil = Python::acquire_gil();
     let py = gil.python();
-    let items: Vec<PyObject> = (0..100).map(|i| {
-        if i % 2 == 0 {
-            i.to_string().to_object(py)
-        } else {
-            true.to_object(py)
-        }
-    }).collect();
+    let items: Vec<PyObject> = (0..100)
+        .map(|i| {
+            if i % 2 == 0 {
+                i.to_string().to_object(py)
+            } else {
+                true.to_object(py)
+            }
+        })
+        .collect();
     let py_list = PyList::new(py, &items);
     assert_eq!(run_isinstance_bool_extract(py_list), 50);
 
@@ -223,13 +319,15 @@ fn run_isinstance_bool_isinstance(items: &PyList) -> i32 {
 fn isinstance_bool_isinstance(bench: &mut Bencher) {
     let gil = Python::acquire_gil();
     let py = gil.python();
-    let items: Vec<PyObject> = (0..100).map(|i| {
-        if i % 2 == 0 {
-            i.to_string().to_object(py)
-        } else {
-            true.to_object(py)
-        }
-    }).collect();
+    let items: Vec<PyObject> = (0..100)
+        .map(|i| {
+            if i % 2 == 0 {
+                i.to_string().to_object(py)
+            } else {
+                true.to_object(py)
+            }
+        })
+        .collect();
     let py_list = PyList::new(py, &items);
     assert_eq!(run_isinstance_bool_isinstance(py_list), 50);
 
@@ -254,13 +352,15 @@ fn run_isinstance_bool_type_is(items: &PyList) -> i32 {
 fn isinstance_bool_type_is(bench: &mut Bencher) {
     let gil = Python::acquire_gil();
     let py = gil.python();
-    let items: Vec<PyObject> = (0..100).map(|i| {
-        if i % 2 == 0 {
-            i.to_string().to_object(py)
-        } else {
-            true.to_object(py)
-        }
-    }).collect();
+    let items: Vec<PyObject> = (0..100)
+        .map(|i| {
+            if i % 2 == 0 {
+                i.to_string().to_object(py)
+            } else {
+                true.to_object(py)
+            }
+        })
+        .collect();
     let py_list = PyList::new(py, &items);
     assert_eq!(run_isinstance_bool_type_is(py_list), 50);
 
@@ -274,7 +374,7 @@ fn run_startswith_py(items: &PyList) -> PyResult<i32> {
     let startswith_pys = intern!(items.py(), "startswith");
     let underscore_pys = intern!(items.py(), "_");
     for item in items.iter() {
-        let startswith_func =  item.cast_as::<PyString>()?.getattr(startswith_pys)?;
+        let startswith_func = item.cast_as::<PyString>()?.getattr(startswith_pys)?;
         if startswith_func.call1((underscore_pys,))?.is_true()? {
             count += 1;
         }
@@ -286,13 +386,15 @@ fn run_startswith_py(items: &PyList) -> PyResult<i32> {
 fn startswith_py(bench: &mut Bencher) {
     let gil = Python::acquire_gil();
     let py = gil.python();
-    let items: Vec<PyObject> = (0..100).map(|i| {
-        if i % 2 == 0 {
-            i.to_string().to_object(py)
-        } else {
-            format!("_{}", i).to_object(py)
-        }
-    }).collect();
+    let items: Vec<PyObject> = (0..100)
+        .map(|i| {
+            if i % 2 == 0 {
+                i.to_string().to_object(py)
+            } else {
+                format!("_{}", i).to_object(py)
+            }
+        })
+        .collect();
     let py_list = PyList::new(py, &items);
     assert_eq!(run_startswith_py(py_list).unwrap(), 50);
 
@@ -316,17 +418,124 @@ fn run_startswith_rust(items: &PyList) -> PyResult<i32> {
 fn startswith_rust(bench: &mut Bencher) {
     let gil = Python::acquire_gil();
     let py = gil.python();
-    let items: Vec<PyObject> = (0..100).map(|i| {
-        if i % 2 == 0 {
-            i.to_string().to_object(py)
-        } else {
-            format!("_{}", i).to_object(py)
-        }
-    }).collect();
+    let items: Vec<PyObject> = (0..100)
+        .map(|i| {
+            if i % 2 == 0 {
+                i.to_string().to_object(py)
+            } else {
+                format!("_{}", i).to_object(py)
+            }
+        })
+        .collect();
     let py_list = PyList::new(py, &items);
     assert_eq!(run_startswith_rust(py_list).unwrap(), 50);
 
     bench.iter(|| {
         black_box(run_startswith_rust(py_list).unwrap());
+    });
+}
+
+fn run_rust_set_hash_set(to_check: &[i32]) -> i32 {
+    let mut set: HashSet<i32> = HashSet::with_capacity(100);
+    for i in 0..100 {
+        set.insert(i);
+    }
+    let mut count = 0;
+    for i in to_check {
+        if set.contains(i) {
+            count += 1;
+        }
+    }
+    count
+}
+
+#[bench]
+fn rust_set_hash_set(bench: &mut Bencher) {
+    let primes: Vec<i32> = vec![
+        1, 3, 5, 7, 11, 13, 1779, 83, 89, 97, 101, 103, 107, 109, 111, 199,
+    ];
+    assert_eq!(run_rust_set_hash_set(&primes), 9);
+
+    bench.iter(|| {
+        black_box(run_rust_set_hash_set(black_box(&primes)));
+    });
+}
+
+fn run_rust_set_btree_set(to_check: &[i32]) -> i32 {
+    let mut set: BTreeSet<i32> = BTreeSet::new();
+    for i in 0..100 {
+        set.insert(i);
+    }
+    let mut count = 0;
+    for i in to_check {
+        if set.contains(i) {
+            count += 1;
+        }
+    }
+    count
+}
+
+#[bench]
+fn rust_set_btree_set(bench: &mut Bencher) {
+    let primes: Vec<i32> = vec![
+        1, 3, 5, 7, 11, 13, 1779, 83, 89, 97, 101, 103, 107, 109, 111, 199,
+    ];
+    assert_eq!(run_rust_set_btree_set(&primes), 9);
+
+    bench.iter(|| {
+        black_box(run_rust_set_btree_set(black_box(&primes)));
+    });
+}
+
+fn run_rust_set_a_hash_set(to_check: &[i32]) -> i32 {
+    let mut set: AHashSet<i32> = AHashSet::with_capacity(100);
+    for i in 0..100 {
+        set.insert(i);
+    }
+    let mut count = 0;
+    for i in to_check {
+        if set.contains(i) {
+            count += 1;
+        }
+    }
+    count
+}
+
+#[bench]
+fn rust_set_a_hash_set(bench: &mut Bencher) {
+    let primes: Vec<i32> = vec![
+        1, 3, 5, 7, 11, 13, 1779, 83, 89, 97, 101, 103, 107, 109, 111, 199,
+    ];
+    assert_eq!(run_rust_set_a_hash_set(&primes), 9);
+
+    bench.iter(|| {
+        black_box(run_rust_set_a_hash_set(black_box(&primes)));
+    });
+}
+
+fn run_rust_set_no_hash_set(to_check: &[i32]) -> i32 {
+    let mut set: HashSet<i32, BuildHasherDefault<NoHashHasher<i32>>> =
+        HashSet::with_capacity_and_hasher(100, BuildHasherDefault::default());
+    for i in 0..100 {
+        set.insert(i);
+    }
+    let mut count = 0;
+    for i in to_check {
+        if set.contains(i) {
+            count += 1;
+        }
+    }
+    count
+}
+
+#[bench]
+fn rust_set_no_hash_set(bench: &mut Bencher) {
+    let primes: Vec<i32> = vec![
+        1, 3, 5, 7, 11, 13, 1779, 83, 89, 97, 101, 103, 107, 109, 111, 199,
+    ];
+    assert_eq!(run_rust_set_no_hash_set(&primes), 9);
+
+    bench.iter(|| {
+        black_box(run_rust_set_no_hash_set(black_box(&primes)));
     });
 }
