@@ -11,7 +11,7 @@ use test::{black_box, Bencher};
 use pyo3::ffi;
 use pyo3::prelude::*;
 use pyo3::type_object::PyTypeObject;
-use pyo3::types::{PyBool, PyDict, PyList, PySet, PyString};
+use pyo3::types::{PyBool, PyDict, PyList, PySet, PyString, PyTuple};
 use pyo3::{intern, AsPyPointer, ToBorrowedObject};
 
 use ahash::AHashSet;
@@ -630,4 +630,44 @@ fn is_str_extract(bench: &mut Bencher) {
         black_box(run_is_str_extract(black_box(py_any_int)));
     });
 }
+
+fn run_instantiation_tuple<'py>(py: Python<'py>, things: &[&PyAny]) -> &'py PyTuple {
+    PyTuple::new(py, things)
+}
+
+#[bench]
+fn instantiation_tuple(bench: &mut Bencher) {
+    let gil = Python::acquire_gil();
+    let py = gil.python();
+    let vec: Vec<&PyAny> = (0..100).map(|i| PyString::new(py, &i.to_string()) as &PyAny).collect();
+
+    for _ in 0..100 {
+        black_box(run_instantiation_tuple(black_box(py), black_box(&vec)));
+    }
+
+    bench.iter(|| {
+        black_box(run_instantiation_tuple(black_box(py), black_box(&vec)));
+    });
+}
+
+
+fn run_instantiation_list<'py>(py: Python<'py>, things: &[&PyAny]) -> &'py PyList {
+    PyList::new(py, things)
+}
+
+#[bench]
+fn instantiation_list(bench: &mut Bencher) {
+    let gil = Python::acquire_gil();
+    let py = gil.python();
+    let vec: Vec<&PyAny> = (0..100).map(|i| PyString::new(py, &i.to_string()) as &PyAny).collect();
+
+    for _ in 0..100 {
+        black_box(run_instantiation_list(black_box(py), black_box(&vec)));
+    }
+
+    bench.iter(|| {
+        black_box(run_instantiation_list(black_box(py), black_box(&vec)));
+    });
+}
+
 
