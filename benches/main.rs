@@ -6,12 +6,13 @@ extern crate test;
 use std::collections::{BTreeSet, HashSet};
 use std::hash::BuildHasherDefault;
 
+use test::{black_box, Bencher};
+
 use pyo3::ffi;
 use pyo3::prelude::*;
 use pyo3::type_object::PyTypeObject;
 use pyo3::types::{PyBool, PyDict, PyList, PySet, PyString};
 use pyo3::{intern, AsPyPointer, ToBorrowedObject};
-use test::{black_box, Bencher};
 
 use ahash::AHashSet;
 use nohash_hasher::NoHashHasher;
@@ -539,3 +540,94 @@ fn rust_set_no_hash_set(bench: &mut Bencher) {
         black_box(run_rust_set_no_hash_set(black_box(&primes)));
     });
 }
+
+fn run_extract_string(py_any: &PyAny) -> bool {
+    let str: String = py_any.extract().unwrap();
+    return str == "foobar"
+}
+
+
+#[bench]
+fn extract_string(bench: &mut Bencher) {
+    let gil = Python::acquire_gil();
+    let py = gil.python();
+    let py_any: &PyAny = PyString::new(py, "foobar");
+    bench.iter(|| {
+        black_box(run_extract_string(black_box(py_any)));
+    });
+}
+
+fn run_to_string_lossy(py_any: &PyAny) -> bool {
+    let py_str: &PyString = py_any.cast_as().unwrap();
+    let str = py_str.to_string_lossy();
+    return str.as_ref() == "foobar"
+}
+
+#[bench]
+fn to_string_lossy(bench: &mut Bencher) {
+    let gil = Python::acquire_gil();
+    let py = gil.python();
+    let py_any: &PyAny = PyString::new(py, "foobar");
+    bench.iter(|| {
+        black_box(run_to_string_lossy(black_box(py_any)));
+    });
+}
+
+fn run_to_str(py_any: &PyAny) -> bool {
+    let py_str: &PyString = py_any.cast_as().unwrap();
+    let str = py_str.to_str().unwrap();
+    return str == "foobar"
+}
+
+#[bench]
+fn to_str(bench: &mut Bencher) {
+    let gil = Python::acquire_gil();
+    let py = gil.python();
+    let py_any: &PyAny = PyString::new(py, "foobar");
+    bench.iter(|| {
+        black_box(run_to_str(black_box(py_any)));
+    });
+}
+
+fn run_is_str_cast_as(py_any: &PyAny) -> Option<String> {
+    if let Ok(py_str) = py_any.cast_as::<PyString>() {
+        Some(py_str.to_str().unwrap().to_string())
+    } else {
+        None
+    }
+}
+
+#[bench]
+fn is_str_cast_as(bench: &mut Bencher) {
+    let gil = Python::acquire_gil();
+    let py = gil.python();
+    let py_any_str: &PyAny = PyString::new(py, "foobar");
+    let py_int = 123.to_object(py);
+    let py_any_int: &PyAny = py_int.extract(py).unwrap();
+    bench.iter(|| {
+        black_box(run_is_str_cast_as(black_box(py_any_str)));
+        black_box(run_is_str_cast_as(black_box(py_any_int)));
+    });
+}
+
+fn run_is_str_extract(py_any: &PyAny) -> Option<String> {
+    if let Ok(str) = py_any.extract::<String>() {
+        Some(str)
+    } else {
+        None
+    }
+}
+
+#[bench]
+fn is_str_extract(bench: &mut Bencher) {
+    let gil = Python::acquire_gil();
+    let py = gil.python();
+    let py_any_str: &PyAny = PyString::new(py, "foobar");
+    let py_int = 123.to_object(py);
+    let py_any_int: &PyAny = py_int.extract(py).unwrap();
+    bench.iter(|| {
+        black_box(run_is_str_extract(black_box(py_any_str)));
+        black_box(run_is_str_extract(black_box(py_any_int)));
+    });
+}
+
