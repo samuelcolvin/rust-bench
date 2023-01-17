@@ -4,7 +4,7 @@ extern crate core;
 extern crate test;
 
 use std::collections::{BTreeSet, HashSet};
-use std::hash::BuildHasherDefault;
+use std::hash::{BuildHasher, BuildHasherDefault, Hash, Hasher};
 
 use test::{black_box, Bencher};
 
@@ -14,8 +14,8 @@ use pyo3::type_object::PyTypeObject;
 use pyo3::types::{PyBool, PyDict, PyList, PySet, PyString, PyTuple};
 use pyo3::{intern, AsPyPointer, ToBorrowedObject};
 
-use ahash::AHashSet;
-use nohash_hasher::NoHashHasher;
+use ahash::{AHashSet, RandomState};
+use nohash_hasher::{NoHashHasher, IntSet};
 
 fn run_dict_simple(py: Python) -> PyResult<PyObject> {
     let dict = PyDict::new(py);
@@ -670,4 +670,193 @@ fn instantiation_list(bench: &mut Bencher) {
     });
 }
 
+fn int_run_vec_contains(vec: &[i64], item: i64) -> bool {
+    vec.contains(&item)
+}
 
+#[bench]
+fn int_vec_contains(bench: &mut Bencher) {
+    let vec: Vec<i64> = (0..5).collect();
+
+    assert!(int_run_vec_contains(black_box(&vec), black_box(3)));
+    assert!(!int_run_vec_contains(black_box(&vec), black_box(5)));
+
+    bench.iter(|| {
+        black_box(int_run_vec_contains(black_box(&vec), black_box(0)));
+        black_box(int_run_vec_contains(black_box(&vec), black_box(1)));
+        black_box(int_run_vec_contains(black_box(&vec), black_box(2)));
+        black_box(int_run_vec_contains(black_box(&vec), black_box(3)));
+        black_box(int_run_vec_contains(black_box(&vec), black_box(4)));
+        black_box(int_run_vec_contains(black_box(&vec), black_box(5)));
+        black_box(int_run_vec_contains(black_box(&vec), black_box(6)));
+        black_box(int_run_vec_contains(black_box(&vec), black_box(7)));
+        black_box(int_run_vec_contains(black_box(&vec), black_box(8)));
+    });
+}
+
+fn int_run_nhset_contains(set: &IntSet<i64>, item: i64) -> bool {
+    set.contains(&item)
+}
+
+#[bench]
+fn int_nhset_contains(bench: &mut Bencher) {
+    let mut set: IntSet<i64> = IntSet::with_capacity_and_hasher(5, BuildHasherDefault::default());
+    for i in 0..5 {
+        set.insert(i);
+    }
+
+    assert!(int_run_nhset_contains(black_box(&set), black_box(3)));
+    assert!(!int_run_nhset_contains(black_box(&set), black_box(6)));
+
+    bench.iter(|| {
+        black_box(int_run_nhset_contains(black_box(&set), black_box(0)));
+        black_box(int_run_nhset_contains(black_box(&set), black_box(1)));
+        black_box(int_run_nhset_contains(black_box(&set), black_box(2)));
+        black_box(int_run_nhset_contains(black_box(&set), black_box(3)));
+        black_box(int_run_nhset_contains(black_box(&set), black_box(4)));
+        black_box(int_run_nhset_contains(black_box(&set), black_box(5)));
+        black_box(int_run_nhset_contains(black_box(&set), black_box(6)));
+        black_box(int_run_nhset_contains(black_box(&set), black_box(7)));
+        black_box(int_run_nhset_contains(black_box(&set), black_box(8)));
+    });
+}
+
+fn int_run_aset_contains(set: &AHashSet<i64>, item: i64) -> bool {
+    set.contains(&item)
+}
+
+#[bench]
+fn int_aset_contains(bench: &mut Bencher) {
+    let mut set: AHashSet<i64> = AHashSet::with_capacity(5);
+    for i in 0..5 {
+        set.insert(i);
+    }
+
+    assert!(int_run_aset_contains(black_box(&set), black_box(3)));
+    assert!(!int_run_aset_contains(black_box(&set), black_box(6)));
+
+    bench.iter(|| {
+        black_box(int_run_aset_contains(black_box(&set), black_box(0)));
+        black_box(int_run_aset_contains(black_box(&set), black_box(1)));
+        black_box(int_run_aset_contains(black_box(&set), black_box(2)));
+        black_box(int_run_aset_contains(black_box(&set), black_box(3)));
+        black_box(int_run_aset_contains(black_box(&set), black_box(4)));
+        black_box(int_run_aset_contains(black_box(&set), black_box(5)));
+        black_box(int_run_aset_contains(black_box(&set), black_box(6)));
+        black_box(int_run_aset_contains(black_box(&set), black_box(7)));
+        black_box(int_run_aset_contains(black_box(&set), black_box(8)));
+    });
+}
+
+
+fn str_run_vec_contains(vec: &[String], item: &str) -> bool {
+    vec.iter().any(|s| s.as_str() == item)
+}
+
+#[bench]
+fn str_vec_contains(bench: &mut Bencher) {
+    let mut vec: Vec<String> = Vec::with_capacity(5);
+    for i in 0..5 {
+        vec.push(format!("number {}", i));
+    }
+
+    assert!(str_run_vec_contains(black_box(&vec), black_box("number 2")));
+    assert!(!str_run_vec_contains(black_box(&vec), black_box("number 5")));
+
+    bench.iter(|| {
+        black_box(str_run_vec_contains(black_box(&vec), black_box("number 0")));
+        black_box(str_run_vec_contains(black_box(&vec), black_box("number 1")));
+        black_box(str_run_vec_contains(black_box(&vec), black_box("number 2")));
+        black_box(str_run_vec_contains(black_box(&vec), black_box("number 3")));
+        black_box(str_run_vec_contains(black_box(&vec), black_box("number 4")));
+        black_box(str_run_vec_contains(black_box(&vec), black_box("number 5")));
+        black_box(str_run_vec_contains(black_box(&vec), black_box("number 6")));
+        black_box(str_run_vec_contains(black_box(&vec), black_box("number 7")));
+        black_box(str_run_vec_contains(black_box(&vec), black_box("number 8")));
+    });
+}
+
+fn str_run_set_contains(set: &AHashSet<String>, item: &str) -> bool {
+    set.contains(item)
+}
+
+#[bench]
+fn str_set_contains(bench: &mut Bencher) {
+    let mut set: AHashSet<String> = AHashSet::with_capacity(5);
+    for i in 0..5 {
+        set.insert(format!("number {}", i));
+    }
+
+    assert!(str_run_set_contains(black_box(&set), black_box("number 3")));
+    assert!(!str_run_set_contains(black_box(&set), black_box("number 6")));
+
+    bench.iter(|| {
+        black_box(str_run_set_contains(black_box(&set), black_box("number 0")));
+        black_box(str_run_set_contains(black_box(&set), black_box("number 1")));
+        black_box(str_run_set_contains(black_box(&set), black_box("number 2")));
+        black_box(str_run_set_contains(black_box(&set), black_box("number 3")));
+        black_box(str_run_set_contains(black_box(&set), black_box("number 4")));
+        black_box(str_run_set_contains(black_box(&set), black_box("number 5")));
+        black_box(str_run_set_contains(black_box(&set), black_box("number 6")));
+        black_box(str_run_set_contains(black_box(&set), black_box("number 7")));
+        black_box(str_run_set_contains(black_box(&set), black_box("number 8")));
+    });
+}
+
+
+struct HashVec {
+    vec: Vec<u64>,
+    hash_builder: RandomState,
+}
+
+impl HashVec {
+    fn new(capacity: usize) -> HashVec {
+        HashVec {
+            vec: Vec::with_capacity(capacity),
+            hash_builder: RandomState::new(),
+        }
+    }
+
+    fn push(&mut self, item: &str) {
+        self.vec.push(self.hash(item));
+    }
+
+    fn contains(&self, item: &str) -> bool {
+        self.vec.contains(&self.hash(item))
+    }
+
+    fn hash(&self, item: &str) -> u64 {
+        // let hash = self.hash_builder.hash_one(item);
+        let mut hasher = self.hash_builder.build_hasher();
+        item.hash(&mut hasher);
+        hasher.finish()
+    }
+}
+
+
+fn str_run_hashvec_contains(hashvec: &HashVec, item: &str) -> bool {
+    hashvec.contains(item)
+}
+
+#[bench]
+fn str_hashvec_contains(bench: &mut Bencher) {
+    let mut v: HashVec = HashVec::new(5);
+    for i in 0..5 {
+        v.push(&format!("number {}", i));
+    }
+
+    assert!(str_run_hashvec_contains(black_box(&v), black_box("number 3")));
+    assert!(!str_run_hashvec_contains(black_box(&v), black_box("number 6")));
+
+    bench.iter(|| {
+        black_box(str_run_hashvec_contains(black_box(&v), black_box("number 0")));
+        black_box(str_run_hashvec_contains(black_box(&v), black_box("number 1")));
+        black_box(str_run_hashvec_contains(black_box(&v), black_box("number 2")));
+        black_box(str_run_hashvec_contains(black_box(&v), black_box("number 3")));
+        black_box(str_run_hashvec_contains(black_box(&v), black_box("number 4")));
+        black_box(str_run_hashvec_contains(black_box(&v), black_box("number 5")));
+        black_box(str_run_hashvec_contains(black_box(&v), black_box("number 6")));
+        black_box(str_run_hashvec_contains(black_box(&v), black_box("number 7")));
+        black_box(str_run_hashvec_contains(black_box(&v), black_box("number 8")));
+    });
+}
