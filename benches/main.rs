@@ -26,7 +26,7 @@ fn run_py_list_vec(py: Python, capacity: usize, to_push: usize) -> Py<PyList> {
 }
 
 #[bench]
-fn py_list_builder(bench: &mut Bencher) {
+fn py_list_complete_builder(bench: &mut Bencher) {
     Python::with_gil(|py| -> PyResult<()> {
         let list_5 = run_py_list_builder(py, 5, 5)?;
         let list_5_expected = run_py_list_vec(py, 5, 5);
@@ -41,7 +41,7 @@ fn py_list_builder(bench: &mut Bencher) {
 }
 
 #[bench]
-fn py_list_vec(bench: &mut Bencher) {
+fn py_list_complete_vec(bench: &mut Bencher) {
     Python::with_gil(|py| {
         bench.iter(|| {
             let py_list = run_py_list_vec(py, 50, 50);
@@ -52,7 +52,7 @@ fn py_list_vec(bench: &mut Bencher) {
 
 
 #[bench]
-fn py_list_builder_incomplete(bench: &mut Bencher) {
+fn py_list_incomplete_builder(bench: &mut Bencher) {
     Python::with_gil(|py| -> PyResult<()> {
         let list_5 = run_py_list_builder(py, 10, 5)?;
         let list_5_expected = run_py_list_vec(py, 5, 5);
@@ -68,7 +68,7 @@ fn py_list_builder_incomplete(bench: &mut Bencher) {
 
 
 #[bench]
-fn py_list_vec_incomplete(bench: &mut Bencher) {
+fn py_list_incomplete_vec(bench: &mut Bencher) {
     Python::with_gil(|py| {
         bench.iter(|| {
             let py_list = run_py_list_vec(py, 50, 40);
@@ -96,7 +96,7 @@ fn run_py_tuple_vec(py: Python, capacity: usize, to_push: usize) -> Py<PyTuple> 
 }
 
 #[bench]
-fn py_tuple_builder(bench: &mut Bencher) {
+fn py_tuple_complete_builder(bench: &mut Bencher) {
     Python::with_gil(|py| -> PyResult<()> {
         let tuple_5 = run_py_tuple_builder(py, 5, 5)?;
         let tuple_5_expected = run_py_tuple_vec(py, 5, 5);
@@ -111,7 +111,7 @@ fn py_tuple_builder(bench: &mut Bencher) {
 }
 
 #[bench]
-fn py_tuple_vec(bench: &mut Bencher) {
+fn py_tuple_complete_vec(bench: &mut Bencher) {
     Python::with_gil(|py| {
         bench.iter(|| {
             let py_tuple = run_py_tuple_vec(py, 50, 50);
@@ -122,7 +122,7 @@ fn py_tuple_vec(bench: &mut Bencher) {
 
 
 #[bench]
-fn py_tuple_builder_incomplete(bench: &mut Bencher) {
+fn py_tuple_incomplete_builder(bench: &mut Bencher) {
     Python::with_gil(|py| -> PyResult<()> {
         let tuple_5 = run_py_tuple_builder(py, 10, 5)?;
         let tuple_5_expected = run_py_tuple_vec(py, 5, 5);
@@ -137,7 +137,7 @@ fn py_tuple_builder_incomplete(bench: &mut Bencher) {
 }
 
 #[bench]
-fn py_tuple_vec_incomplete(bench: &mut Bencher) {
+fn py_tuple_incomplete_vec(bench: &mut Bencher) {
     Python::with_gil(|py| {
         bench.iter(|| {
             let py_tuple = run_py_tuple_vec(py, 50, 40);
