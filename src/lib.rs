@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 
-use pyo3::AsPyPointer;
+use pyo3::{AsPyPointer};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::ffi::{Py_ssize_t, PyList_AsTuple, PyList_GetSlice, PyList_New, PyList_SetItem, PyTuple_GetSlice, PyTuple_New, PyTuple_SetItem};
@@ -25,10 +25,10 @@ impl PyListBuilder {
         }
     }
 
-    pub fn push(&mut self, item: PyObject) -> PyResult<()> {
+    pub fn push(&mut self, py: Python, item: impl ToPyObject) -> PyResult<()>{
         let ptr = self.list.as_ptr();
         unsafe {
-            match PyList_SetItem(ptr, self.counter, item.into_ptr()) {
+            match PyList_SetItem(ptr, self.counter, item.to_object(py).into_ptr()) {
                 0 => {
                     self.counter += 1;
                     Ok(())
@@ -38,15 +38,27 @@ impl PyListBuilder {
         }
     }
 
-    pub fn complete(self, py: Python) -> Py<PyList> {
+    pub fn get(self, py: Python) -> PyResult<&PyList> {
         match self.counter.cmp(&self.len) {
             // we've filled the list, return it
-            Ordering::Equal => self.list,
+            Ordering::Equal => Ok(self.list.into_ref(py)),
+            // we haven't yet filled the list, return a slice
+            Ordering::Less => Err(PyValueError::new_err("list not yet complete")),
+            // shouldn't happen
+            Ordering::Greater => unreachable!("complete() exceeded list capacity"),
+        }
+    }
+
+    pub fn get_incomplete(self, py: Python) -> &PyList {
+        match self.counter.cmp(&self.len) {
+            // we've filled the list, return it
+            Ordering::Equal => self.list.into_ref(py),
             // we haven't yet filled the list, return a slice
             Ordering::Less => unsafe {
                 let ptr = self.list.as_ptr();
                 let slice_ptr = PyList_GetSlice(ptr, 0, self.counter);
-                Py::from_owned_ptr(py, slice_ptr)
+                let py_list: Py<PyList> = Py::from_owned_ptr(py, slice_ptr);
+                py_list.into_ref(py)
             },
             // shouldn't happen
             Ordering::Greater => unreachable!("complete() exceeded list capacity"),
@@ -81,10 +93,10 @@ impl PyTupleBuilder {
         }
     }
 
-    pub fn push(&mut self, item: PyObject) -> PyResult<()> {
+    pub fn push(&mut self, py: Python, item: impl ToPyObject) -> PyResult<()> {
         let ptr = self.tuple.as_ptr();
         unsafe {
-            match PyTuple_SetItem(ptr, self.counter, item.into_ptr()) {
+            match PyTuple_SetItem(ptr, self.counter, item.to_object(py).into_ptr()) {
                 0 => {
                     self.counter += 1;
                     Ok(())
@@ -93,16 +105,27 @@ impl PyTupleBuilder {
             }
         }
     }
-
-    pub fn complete(self, py: Python) -> Py<PyTuple> {
+    pub fn get(self, py: Python) -> PyResult<&PyTuple> {
         match self.counter.cmp(&self.len) {
             // we've filled the tuple, return it
-            Ordering::Equal => self.tuple,
+            Ordering::Equal => Ok(self.tuple.into_ref(py)),
+            // we haven't yet filled the tuple, error
+            Ordering::Less => Err(PyValueError::new_err("tuple not yet filled")),
+            // shouldn't happen
+            Ordering::Greater => unreachable!("complete() exceeded tuple capacity"),
+        }
+    }
+
+    pub fn get_incomplete(self, py: Python) -> &PyTuple {
+        match self.counter.cmp(&self.len) {
+            // we've filled the tuple, return it
+            Ordering::Equal => self.tuple.into_ref(py),
             // we haven't yet filled the tuple, return a slice
             Ordering::Less => unsafe {
                 let ptr = self.tuple.as_ptr();
                 let slice_ptr = PyTuple_GetSlice(ptr, 0, self.counter);
-                Py::from_owned_ptr(py, slice_ptr)
+                let py_tuple: Py<PyTuple> = Py::from_owned_ptr(py, slice_ptr);
+                py_tuple.into_ref(py)
             },
             // shouldn't happen
             Ordering::Greater => unreachable!("complete() exceeded tuple capacity"),
