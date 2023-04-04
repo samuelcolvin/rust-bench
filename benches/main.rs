@@ -17,6 +17,11 @@ use pyo3::{intern, AsPyPointer, ToBorrowedObject};
 use ahash::{AHashSet, RandomState};
 use nohash_hasher::{NoHashHasher, IntSet};
 
+#[path = "../src/main.rs"] // Here
+mod main;
+
+use main::StackString;
+
 fn run_dict_simple(py: Python) -> PyResult<PyObject> {
     let dict = PyDict::new(py);
     for i in 0..100 {
@@ -763,6 +768,7 @@ fn str_vec_contains(bench: &mut Bencher) {
     assert!(str_run_vec_contains(black_box(&vec), black_box("number 2")));
     assert!(!str_run_vec_contains(black_box(&vec), black_box("number 5")));
 
+<<<<<<< Updated upstream
     bench.iter(|| {
         black_box(str_run_vec_contains(black_box(&vec), black_box("number 0")));
         black_box(str_run_vec_contains(black_box(&vec), black_box("number 1")));
@@ -860,3 +866,34 @@ fn str_hashvec_contains(bench: &mut Bencher) {
         black_box(str_run_hashvec_contains(black_box(&v), black_box("number 8")));
     });
 }
+
+fn run_stack_string_std<'py>(s: &str) -> [String; 3] {
+    [
+        s.to_string(),
+        s.to_string(),
+        s.to_string(),
+    ]
+}
+
+#[bench]
+fn stack_string_std(bench: &mut Bencher) {
+    bench.iter(|| {
+        black_box(run_stack_string_std(black_box("this is a long string case")));
+    });
+}
+
+fn run_stack_string<'py>(s: &str) -> [StackString; 3] {
+    [
+        StackString::new(s),
+        StackString::new(s),
+        StackString::new(s),
+    ]
+}
+
+#[bench]
+fn stack_string(bench: &mut Bencher) {
+    bench.iter(|| {
+        black_box(run_stack_string(black_box("this is a long string case")));
+    });
+}
+
