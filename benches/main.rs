@@ -1,418 +1,23 @@
 #![feature(test)]
 
-extern crate core;
 extern crate test;
 
 use std::collections::{BTreeSet, HashSet};
-use std::hash::{BuildHasher, BuildHasherDefault, Hash, Hasher};
-
+use std::collections::hash_map::RandomState;
+use std::hash::{BuildHasher, Hash, Hasher};
 use test::{black_box, Bencher};
+use ahash::AHashSet;
 
-use pyo3::ffi;
 use pyo3::prelude::*;
-use pyo3::type_object::PyTypeObject;
-use pyo3::types::{PyBool, PyDict, PyList, PySet, PyString, PyTuple};
-use pyo3::{intern, AsPyPointer, ToBorrowedObject};
+use pyo3::types::{PyInt, PyIterator, PyList, PyString, PyTuple};
 
-use ahash::{AHashSet, RandomState};
-use nohash_hasher::{NoHashHasher, IntSet};
+use rust_bench::{PyListBuilder, PyTupleBuilder, list_as_tuple};
 
-#[path = "../src/main.rs"] // Here
-mod main;
-
-use main::StackString;
-
-fn run_dict_simple(py: Python) -> PyResult<PyObject> {
-    let dict = PyDict::new(py);
-    for i in 0..100 {
-        dict.set_item(i.to_string(), i)?;
-    }
-    Ok(dict.into_py(py))
-}
-
-#[bench]
-fn dict_simple(bench: &mut Bencher) {
-    let gil = Python::acquire_gil();
-    let py = gil.python();
-
-    bench.iter(|| {
-        black_box(run_dict_simple(py).unwrap());
-    });
-}
-
-fn run_dict_list(py: Python) -> PyResult<PyObject> {
-    let mut items: Vec<(String, i64)> = Vec::with_capacity(100);
-    for i in 0..100 {
-        items.push((i.to_string(), i));
-    }
-    let dict = PyDict::from_sequence(py, items.into_py(py))?;
-    Ok(dict.into_py(py))
-}
-
-#[bench]
-fn dict_list(bench: &mut Bencher) {
-    let gil = Python::acquire_gil();
-    let py = gil.python();
-
-    bench.iter(|| {
-        black_box(run_dict_list(py).unwrap());
-    });
-}
-
-pub fn error_on_minusone(py: Python<'_>, result: std::os::raw::c_int) -> PyResult<()> {
-    if result != -1 {
-        Ok(())
-    } else {
-        Err(PyErr::fetch(py))
-    }
-}
-
-fn run_dict_reuse_str(py: Python, keys: &Vec<&PyString>) -> PyResult<PyObject> {
-    let dict = PyDict::new(py);
-    for i in 0..100 {
-        let key = keys[i];
-        let value = i;
-        dict.set_item(key, value)?;
-    }
-    Ok(dict.into_py(py))
-}
-
-#[bench]
-fn dict_reuse_str(bench: &mut Bencher) {
-    let gil = Python::acquire_gil();
-    let py = gil.python();
-
-    let keys: Vec<&PyString> = (0..100)
-        .map(|i| PyString::new(py, &i.to_string()))
-        .collect();
-
-    bench.iter(|| {
-        black_box(run_dict_reuse_str(py, &keys).unwrap());
-    });
-}
-
-fn run_dict_reuse_known_hash(py: Python, keys: &Vec<(&PyString, isize)>) -> PyResult<PyObject> {
-    let dict = PyDict::new(py);
-    for i in 0..100 {
-        let (key, hash) = keys[i];
-        let value = i;
-        let key_ptr = key.as_ptr();
-        value.with_borrowed_ptr(py, |value| unsafe {
-            error_on_minusone(
-                py,
-                ffi::_PyDict_SetItem_KnownHash(dict.as_ptr(), key_ptr, value, hash),
-            )
-        })?
-    }
-    Ok(dict.into_py(py))
-}
-
-#[bench]
-fn dict_reuse_known_hash(bench: &mut Bencher) {
-    let gil = Python::acquire_gil();
-    let py = gil.python();
-
-    let keys: Vec<(&PyString, isize)> = (0..100)
-        .map(|i| {
-            let s = PyString::new(py, &i.to_string());
-            let hash = s.hash().unwrap();
-            (s, hash)
-        })
-        .collect();
-
-    bench.iter(|| {
-        black_box(run_dict_reuse_known_hash(py, &keys).unwrap());
-    });
-}
-
-fn run_dict_known_hash(py: Python) -> PyResult<PyObject> {
-    let dict = PyDict::new(py);
-    for i in 0..100 {
-        let key = i.to_string();
-        let value = i;
-        let hash = i as isize;
-        let key_ptr = key.into_py(py).as_ptr();
-        value.with_borrowed_ptr(py, |value| unsafe {
-            error_on_minusone(
-                py,
-                ffi::_PyDict_SetItem_KnownHash(dict.as_ptr(), key_ptr, value, hash),
-            )
-        })?
-    }
-    Ok(dict.into_py(py))
-}
-
-#[bench]
-fn dict_known_hash(bench: &mut Bencher) {
-    let gil = Python::acquire_gil();
-    let py = gil.python();
-
-    // check this works with `cargo bench -- --nocapture`
-    // let dict = run_dict_known_hash(py).unwrap();
-    // let dict: &PyDict = dict.extract(py).unwrap();
-    // for (key, value) in dict.iter() {
-    //     println!("{:?} -> {:?}", key, value);
-    // }
-
-    bench.iter(|| {
-        black_box(run_dict_known_hash(py).unwrap());
-    });
-}
-
-fn run_set_simple(py: Python) -> PyResult<PyObject> {
-    let set = PySet::empty(py)?;
-    for i in 0..100 {
-        set.add(i.to_string())?;
-    }
-    Ok(set.into_py(py))
-}
-
-#[bench]
-fn set_simple(bench: &mut Bencher) {
-    let gil = Python::acquire_gil();
-    let py = gil.python();
-
-    bench.iter(|| {
-        black_box(run_set_simple(py).unwrap());
-    });
-}
-
-fn run_set_vec(py: Python, keys: &Vec<&PyString>) -> PyResult<PyObject> {
-    let mut vec: Vec<&PyString> = Vec::with_capacity(100);
-    for i in 0..100 {
-        let key = keys[i];
-        vec.push(key);
-    }
-    let set = PySet::new(py, &vec)?;
-    Ok(set.into_py(py))
-}
-
-#[bench]
-fn set_vec(bench: &mut Bencher) {
-    let gil = Python::acquire_gil();
-    let py = gil.python();
-    let keys: Vec<&PyString> = (0..100)
-        .map(|i| PyString::intern(py, &i.to_string()))
-        .collect();
-
-    bench.iter(|| {
-        black_box(run_set_vec(py, &keys).unwrap());
-    });
-}
-
-fn run_set_vec2(py: Python, keys: &Vec<Py<PyString>>) -> PyResult<PyObject> {
-    let mut vec: Vec<Py<PyString>> = Vec::with_capacity(100);
-    for i in 0..100 {
-        let key = &keys[i];
-        vec.push(key.clone_ref(py));
-    }
-    let set = PySet::new(py, &vec)?;
-    Ok(set.into_py(py))
-}
-
-#[bench]
-fn set_vec2(bench: &mut Bencher) {
-    let gil = Python::acquire_gil();
-    let py = gil.python();
-    let keys: Vec<Py<PyString>> = (0..100)
-        .map(|i| PyString::intern(py, &i.to_string()).into_py(py))
-        .collect();
-
-    bench.iter(|| {
-        black_box(run_set_vec2(py, &keys).unwrap());
-    });
-}
-
-fn run_hashset_simple(checks: &[String]) -> i32 {
-    let mut set: HashSet<String> = HashSet::with_capacity(100);
-    for i in 0..100 {
-        set.insert(i.to_string());
-    }
-    let mut count = 0;
-    for i in checks {
-        if set.contains(i) {
-            count += 1;
-        }
-    }
-    count
-}
-
-#[bench]
-fn hashset_simple(bench: &mut Bencher) {
-    let checks: Vec<String> = vec![
-        "1".to_string(),
-        "50".to_string(),
-        "51".to_string(),
-        "99".to_string(),
-        "100".to_string(),
-    ];
-    bench.iter(|| {
-        black_box(run_hashset_simple(&checks));
-    });
-}
-
-fn run_hashset_vec(checks: &[String]) -> i32 {
-    let mut vec: Vec<String> = Vec::with_capacity(100);
-    for i in 0..100 {
-        vec.push(i.to_string());
-    }
-    let set: HashSet<String> = HashSet::from_iter(vec);
-    let mut count = 0;
-    for i in checks {
-        if set.contains(i) {
-            count += 1;
-        }
-    }
-    count
-}
-
-#[bench]
-fn hashset_vec(bench: &mut Bencher) {
-    let checks: Vec<String> = vec![
-        "1".to_string(),
-        "50".to_string(),
-        "51".to_string(),
-        "99".to_string(),
-        "100".to_string(),
-    ];
-    bench.iter(|| {
-        black_box(run_hashset_vec(&checks));
-    });
-}
-
-fn run_isinstance_bool_extract(items: &PyList) -> i32 {
-    let mut count = 0;
-    for item in items.iter() {
-        if item.cast_as::<PyBool>().is_ok() {
-            count += 1;
-        }
-    }
-    count
-}
-
-#[bench]
-fn isinstance_bool_extract(bench: &mut Bencher) {
-    let gil = Python::acquire_gil();
-    let py = gil.python();
-    let items: Vec<PyObject> = (0..100)
-        .map(|i| {
-            if i % 2 == 0 {
-                i.to_string().to_object(py)
-            } else {
-                true.to_object(py)
-            }
-        })
-        .collect();
-    let py_list = PyList::new(py, &items);
-    assert_eq!(run_isinstance_bool_extract(py_list), 50);
-
-    bench.iter(|| {
-        black_box(run_isinstance_bool_extract(py_list));
-    });
-}
-
-fn run_isinstance_bool_isinstance(items: &PyList) -> i32 {
-    let mut count = 0;
-    for item in items.iter() {
-        if matches!(item.is_instance_of::<PyBool>(), Ok(true)) {
-            count += 1;
-        }
-    }
-    count
-}
-
-#[bench]
-fn isinstance_bool_isinstance(bench: &mut Bencher) {
-    let gil = Python::acquire_gil();
-    let py = gil.python();
-    let items: Vec<PyObject> = (0..100)
-        .map(|i| {
-            if i % 2 == 0 {
-                i.to_string().to_object(py)
-            } else {
-                true.to_object(py)
-            }
-        })
-        .collect();
-    let py_list = PyList::new(py, &items);
-    assert_eq!(run_isinstance_bool_isinstance(py_list), 50);
-
-    bench.iter(|| {
-        black_box(run_isinstance_bool_isinstance(py_list));
-    });
-}
-
-fn run_isinstance_bool_type_is(items: &PyList) -> i32 {
-    let mut count = 0;
-    let bool_type = PyBool::type_object(items.py());
-    for item in items.iter() {
-        let t = item.get_type();
-        if t.is(bool_type) {
-            count += 1;
-        }
-    }
-    count
-}
-
-#[bench]
-fn isinstance_bool_type_is(bench: &mut Bencher) {
-    let gil = Python::acquire_gil();
-    let py = gil.python();
-    let items: Vec<PyObject> = (0..100)
-        .map(|i| {
-            if i % 2 == 0 {
-                i.to_string().to_object(py)
-            } else {
-                true.to_object(py)
-            }
-        })
-        .collect();
-    let py_list = PyList::new(py, &items);
-    assert_eq!(run_isinstance_bool_type_is(py_list), 50);
-
-    bench.iter(|| {
-        black_box(run_isinstance_bool_type_is(py_list));
-    });
-}
-
-fn run_startswith_py(items: &PyList) -> PyResult<i32> {
-    let mut count = 0;
-    let startswith_pys = intern!(items.py(), "startswith");
-    let underscore_pys = intern!(items.py(), "_");
-    for item in items.iter() {
-        let startswith_func = item.cast_as::<PyString>()?.getattr(startswith_pys)?;
-        if startswith_func.call1((underscore_pys,))?.is_true()? {
-            count += 1;
-        }
-    }
-    Ok(count)
-}
-
-#[bench]
-fn startswith_py(bench: &mut Bencher) {
-    let gil = Python::acquire_gil();
-    let py = gil.python();
-    let items: Vec<PyObject> = (0..100)
-        .map(|i| {
-            if i % 2 == 0 {
-                i.to_string().to_object(py)
-            } else {
-                format!("_{}", i).to_object(py)
-            }
-        })
-        .collect();
-    let py_list = PyList::new(py, &items);
-    assert_eq!(run_startswith_py(py_list).unwrap(), 50);
-
-    bench.iter(|| {
-        black_box(run_startswith_py(py_list).unwrap());
-    });
-}
 
 fn run_startswith_rust(items: &PyList) -> PyResult<i32> {
     let mut count = 0;
     for item in items.iter() {
-        let item_cow = item.cast_as::<PyString>()?.to_string_lossy();
+        let item_cow = item.downcast::<PyString>()?.to_string_lossy();
         if item_cow.as_ref().starts_with('_') {
             count += 1;
         }
@@ -422,22 +27,22 @@ fn run_startswith_rust(items: &PyList) -> PyResult<i32> {
 
 #[bench]
 fn startswith_rust(bench: &mut Bencher) {
-    let gil = Python::acquire_gil();
-    let py = gil.python();
-    let items: Vec<PyObject> = (0..100)
-        .map(|i| {
-            if i % 2 == 0 {
-                i.to_string().to_object(py)
-            } else {
-                format!("_{}", i).to_object(py)
-            }
-        })
-        .collect();
-    let py_list = PyList::new(py, &items);
-    assert_eq!(run_startswith_rust(py_list).unwrap(), 50);
+    Python::with_gil(|py| {
+        let items: Vec<PyObject> = (0..100)
+            .map(|i| {
+                if i % 2 == 0 {
+                    i.to_string().to_object(py)
+                } else {
+                    format!("_{}", i).to_object(py)
+                }
+            })
+            .collect();
+        let py_list = PyList::new(py, &items);
+        assert_eq!(run_startswith_rust(py_list).unwrap(), 50);
 
-    bench.iter(|| {
-        black_box(run_startswith_rust(py_list).unwrap());
+        bench.iter(|| {
+            black_box(run_startswith_rust(py_list).unwrap());
+        });
     });
 }
 
@@ -519,83 +124,55 @@ fn rust_set_a_hash_set(bench: &mut Bencher) {
     });
 }
 
-fn run_rust_set_no_hash_set(to_check: &[i32]) -> i32 {
-    let mut set: HashSet<i32, BuildHasherDefault<NoHashHasher<i32>>> =
-        HashSet::with_capacity_and_hasher(100, BuildHasherDefault::default());
-    for i in 0..100 {
-        set.insert(i);
-    }
-    let mut count = 0;
-    for i in to_check {
-        if set.contains(i) {
-            count += 1;
-        }
-    }
-    count
-}
-
-#[bench]
-fn rust_set_no_hash_set(bench: &mut Bencher) {
-    let primes: Vec<i32> = vec![
-        1, 3, 5, 7, 11, 13, 1779, 83, 89, 97, 101, 103, 107, 109, 111, 199,
-    ];
-    assert_eq!(run_rust_set_no_hash_set(&primes), 9);
-
-    bench.iter(|| {
-        black_box(run_rust_set_no_hash_set(black_box(&primes)));
-    });
-}
-
 fn run_extract_string(py_any: &PyAny) -> bool {
     let str: String = py_any.extract().unwrap();
     return str == "foobar"
 }
 
-
 #[bench]
 fn extract_string(bench: &mut Bencher) {
-    let gil = Python::acquire_gil();
-    let py = gil.python();
-    let py_any: &PyAny = PyString::new(py, "foobar");
-    bench.iter(|| {
-        black_box(run_extract_string(black_box(py_any)));
+    Python::with_gil(|py| {
+        let py_any: &PyAny = PyString::new(py, "foobar");
+        bench.iter(|| {
+            black_box(run_extract_string(black_box(py_any)));
+        });
     });
 }
 
 fn run_to_string_lossy(py_any: &PyAny) -> bool {
-    let py_str: &PyString = py_any.cast_as().unwrap();
+    let py_str: &PyString = py_any.downcast().unwrap();
     let str = py_str.to_string_lossy();
     return str.as_ref() == "foobar"
 }
 
 #[bench]
 fn to_string_lossy(bench: &mut Bencher) {
-    let gil = Python::acquire_gil();
-    let py = gil.python();
-    let py_any: &PyAny = PyString::new(py, "foobar");
-    bench.iter(|| {
-        black_box(run_to_string_lossy(black_box(py_any)));
+    Python::with_gil(|py| {
+        let py_any: &PyAny = PyString::new(py, "foobar");
+        bench.iter(|| {
+            black_box(run_to_string_lossy(black_box(py_any)));
+        });
     });
 }
 
 fn run_to_str(py_any: &PyAny) -> bool {
-    let py_str: &PyString = py_any.cast_as().unwrap();
+    let py_str: &PyString = py_any.downcast().unwrap();
     let str = py_str.to_str().unwrap();
     return str == "foobar"
 }
 
 #[bench]
 fn to_str(bench: &mut Bencher) {
-    let gil = Python::acquire_gil();
-    let py = gil.python();
-    let py_any: &PyAny = PyString::new(py, "foobar");
-    bench.iter(|| {
-        black_box(run_to_str(black_box(py_any)));
+    Python::with_gil(|py| {
+        let py_any: &PyAny = PyString::new(py, "foobar");
+        bench.iter(|| {
+            black_box(run_to_str(black_box(py_any)));
+        });
     });
 }
 
 fn run_is_str_cast_as(py_any: &PyAny) -> Option<String> {
-    if let Ok(py_str) = py_any.cast_as::<PyString>() {
+    if let Ok(py_str) = py_any.downcast::<PyString>() {
         Some(py_str.to_str().unwrap().to_string())
     } else {
         None
@@ -604,14 +181,14 @@ fn run_is_str_cast_as(py_any: &PyAny) -> Option<String> {
 
 #[bench]
 fn is_str_cast_as(bench: &mut Bencher) {
-    let gil = Python::acquire_gil();
-    let py = gil.python();
-    let py_any_str: &PyAny = PyString::new(py, "foobar");
-    let py_int = 123.to_object(py);
-    let py_any_int: &PyAny = py_int.extract(py).unwrap();
-    bench.iter(|| {
-        black_box(run_is_str_cast_as(black_box(py_any_str)));
-        black_box(run_is_str_cast_as(black_box(py_any_int)));
+    Python::with_gil(|py| {
+        let py_any_str: &PyAny = PyString::new(py, "foobar");
+        let py_int = 123.to_object(py);
+        let py_any_int: &PyAny = py_int.extract(py).unwrap();
+        bench.iter(|| {
+            black_box(run_is_str_cast_as(black_box(py_any_str)));
+            black_box(run_is_str_cast_as(black_box(py_any_int)));
+        });
     });
 }
 
@@ -625,14 +202,14 @@ fn run_is_str_extract(py_any: &PyAny) -> Option<String> {
 
 #[bench]
 fn is_str_extract(bench: &mut Bencher) {
-    let gil = Python::acquire_gil();
-    let py = gil.python();
-    let py_any_str: &PyAny = PyString::new(py, "foobar");
-    let py_int = 123.to_object(py);
-    let py_any_int: &PyAny = py_int.extract(py).unwrap();
-    bench.iter(|| {
-        black_box(run_is_str_extract(black_box(py_any_str)));
-        black_box(run_is_str_extract(black_box(py_any_int)));
+    Python::with_gil(|py| {
+        let py_any_str: &PyAny = PyString::new(py, "foobar");
+        let py_int = 123.to_object(py);
+        let py_any_int: &PyAny = py_int.extract(py).unwrap();
+        bench.iter(|| {
+            black_box(run_is_str_extract(black_box(py_any_str)));
+            black_box(run_is_str_extract(black_box(py_any_int)));
+        });
     });
 }
 
@@ -642,16 +219,16 @@ fn run_instantiation_tuple<'py>(py: Python<'py>, things: &[&PyAny]) -> &'py PyTu
 
 #[bench]
 fn instantiation_tuple(bench: &mut Bencher) {
-    let gil = Python::acquire_gil();
-    let py = gil.python();
-    let vec: Vec<&PyAny> = (0..100).map(|i| PyString::new(py, &i.to_string()) as &PyAny).collect();
+    Python::with_gil(|py| {
+        let vec: Vec<&PyAny> = (0..100).map(|i| PyString::new(py, &i.to_string()) as &PyAny).collect();
 
-    for _ in 0..100 {
-        black_box(run_instantiation_tuple(black_box(py), black_box(&vec)));
-    }
+        for _ in 0..100 {
+            black_box(run_instantiation_tuple(black_box(py), black_box(&vec)));
+        }
 
-    bench.iter(|| {
-        black_box(run_instantiation_tuple(black_box(py), black_box(&vec)));
+        bench.iter(|| {
+            black_box(run_instantiation_tuple(black_box(py), black_box(&vec)));
+        });
     });
 }
 
@@ -662,16 +239,16 @@ fn run_instantiation_list<'py>(py: Python<'py>, things: &[&PyAny]) -> &'py PyLis
 
 #[bench]
 fn instantiation_list(bench: &mut Bencher) {
-    let gil = Python::acquire_gil();
-    let py = gil.python();
-    let vec: Vec<&PyAny> = (0..100).map(|i| PyString::new(py, &i.to_string()) as &PyAny).collect();
+    Python::with_gil(|py| {
+        let vec: Vec<&PyAny> = (0..100).map(|i| PyString::new(py, &i.to_string()) as &PyAny).collect();
 
-    for _ in 0..100 {
-        black_box(run_instantiation_list(black_box(py), black_box(&vec)));
-    }
+        for _ in 0..100 {
+            black_box(run_instantiation_list(black_box(py), black_box(&vec)));
+        }
 
-    bench.iter(|| {
-        black_box(run_instantiation_list(black_box(py), black_box(&vec)));
+        bench.iter(|| {
+            black_box(run_instantiation_list(black_box(py), black_box(&vec)));
+        });
     });
 }
 
@@ -696,33 +273,6 @@ fn int_vec_contains(bench: &mut Bencher) {
         black_box(int_run_vec_contains(black_box(&vec), black_box(6)));
         black_box(int_run_vec_contains(black_box(&vec), black_box(7)));
         black_box(int_run_vec_contains(black_box(&vec), black_box(8)));
-    });
-}
-
-fn int_run_nhset_contains(set: &IntSet<i64>, item: i64) -> bool {
-    set.contains(&item)
-}
-
-#[bench]
-fn int_nhset_contains(bench: &mut Bencher) {
-    let mut set: IntSet<i64> = IntSet::with_capacity_and_hasher(5, BuildHasherDefault::default());
-    for i in 0..5 {
-        set.insert(i);
-    }
-
-    assert!(int_run_nhset_contains(black_box(&set), black_box(3)));
-    assert!(!int_run_nhset_contains(black_box(&set), black_box(6)));
-
-    bench.iter(|| {
-        black_box(int_run_nhset_contains(black_box(&set), black_box(0)));
-        black_box(int_run_nhset_contains(black_box(&set), black_box(1)));
-        black_box(int_run_nhset_contains(black_box(&set), black_box(2)));
-        black_box(int_run_nhset_contains(black_box(&set), black_box(3)));
-        black_box(int_run_nhset_contains(black_box(&set), black_box(4)));
-        black_box(int_run_nhset_contains(black_box(&set), black_box(5)));
-        black_box(int_run_nhset_contains(black_box(&set), black_box(6)));
-        black_box(int_run_nhset_contains(black_box(&set), black_box(7)));
-        black_box(int_run_nhset_contains(black_box(&set), black_box(8)));
     });
 }
 
@@ -768,7 +318,6 @@ fn str_vec_contains(bench: &mut Bencher) {
     assert!(str_run_vec_contains(black_box(&vec), black_box("number 2")));
     assert!(!str_run_vec_contains(black_box(&vec), black_box("number 5")));
 
-<<<<<<< Updated upstream
     bench.iter(|| {
         black_box(str_run_vec_contains(black_box(&vec), black_box("number 0")));
         black_box(str_run_vec_contains(black_box(&vec), black_box("number 1")));
@@ -867,33 +416,442 @@ fn str_hashvec_contains(bench: &mut Bencher) {
     });
 }
 
-fn run_stack_string_std<'py>(s: &str) -> [String; 3] {
-    [
-        s.to_string(),
-        s.to_string(),
-        s.to_string(),
-    ]
+
+fn get_value(i: &usize) -> usize {
+    // format!("value_{}", i)
+    *i
+}
+
+fn run_py_list_builder<'py>(py: Python<'py>, input: &[usize]) -> PyResult<&'py PyList> {
+    let mut list_builder = PyListBuilder::with_capacity(py, input.len())?;
+    for i in input {
+        list_builder.push(py , get_value(i))?;
+    }
+    list_builder.get(py)
+}
+
+fn run_py_list_builder_alt<'py>(py: Python<'py>, input: &[usize]) -> PyResult<&'py PyList> {
+    let mut list_builder = PyListBuilder::with_capacity(py, input.len())?;
+    for i in input {
+        list_builder.push_alt(py , get_value(i))?;
+    }
+    list_builder.get(py)
+}
+
+
+fn run_py_list_builder_incomplete<'py>(py: Python<'py>, break_at: usize, input: &[usize]) -> PyResult<&'py PyList> {
+    let mut list_builder = PyListBuilder::with_capacity(py, input.len())?;
+    for i in input {
+        list_builder.push(py , get_value(i))?;
+        if i >= &break_at {
+            break;
+        }
+    }
+    Ok(list_builder.get_incomplete(py))
+}
+
+fn run_py_list_vec<'py>(py: Python<'py>, input: &[usize]) -> &'py PyList {
+    let mut vec = Vec::with_capacity(input.len());
+    for i in input {
+        vec.push(get_value(i));
+    }
+    PyList::new(py, vec)
+}
+
+fn run_py_list_vec_incomplete<'py>(py: Python<'py>, break_at: usize, input: &[usize]) -> &'py PyList {
+    let mut vec = Vec::with_capacity(input.len());
+    for i in input {
+        vec.push(get_value(i));
+        if i >= &break_at {
+            break;
+        }
+    }
+    PyList::new(py, vec)
 }
 
 #[bench]
-fn stack_string_std(bench: &mut Bencher) {
-    bench.iter(|| {
-        black_box(run_stack_string_std(black_box("this is a long string case")));
-    });
-}
+fn py_list_complete_builder(bench: &mut Bencher) {
+    Python::with_gil(|py| -> PyResult<()> {
+        let vec_5 = vec![0, 1, 2, 3, 4];
+        let list_5 = run_py_list_builder(py, &vec_5)?;
+        let list_5_expected = run_py_list_vec(py, &vec_5);
+        assert!(list_5.eq(list_5_expected)?);
 
-fn run_stack_string<'py>(s: &str) -> [StackString; 3] {
-    [
-        StackString::new(s),
-        StackString::new(s),
-        StackString::new(s),
-    ]
+        let vec_500: Vec<usize> = (0..500).collect();
+
+        bench.iter(|| {
+            let list_500 = run_py_list_builder(py, black_box(&vec_500)).unwrap();
+            black_box(list_500);
+        });
+        Ok(())
+    }).unwrap();
 }
 
 #[bench]
-fn stack_string(bench: &mut Bencher) {
-    bench.iter(|| {
-        black_box(run_stack_string(black_box("this is a long string case")));
+fn py_list_complete_builder_alt(bench: &mut Bencher) {
+    Python::with_gil(|py| -> PyResult<()> {
+        let vec_5 = vec![0, 1, 2, 3, 4];
+        let list_5 = run_py_list_builder_alt(py, &vec_5)?;
+        let list_5_expected = run_py_list_vec(py, &vec_5);
+        assert!(list_5.eq(list_5_expected)?);
+
+        let vec_500: Vec<usize> = (0..500).collect();
+
+        bench.iter(|| {
+            let list_500 = run_py_list_builder_alt(py, black_box(&vec_500)).unwrap();
+            black_box(list_500);
+        });
+        Ok(())
+    }).unwrap();
+}
+
+#[bench]
+fn py_list_complete_vec(bench: &mut Bencher) {
+    Python::with_gil(|py| {
+        let vec_500: Vec<usize> = (0..500).collect();
+
+        bench.iter(|| {
+            let py_list = run_py_list_vec(py, black_box(&vec_500));
+            black_box(py_list);
+        });
     });
 }
 
+
+#[bench]
+fn py_list_incomplete_builder(bench: &mut Bencher) {
+    Python::with_gil(|py| -> PyResult<()> {
+        let vec_5 = vec![0, 1, 2, 3, 4];
+        let list_3 = run_py_list_builder_incomplete(py, 3, &vec_5)?;
+        let list_3_expected = run_py_list_vec_incomplete(py, 3, &vec_5);
+        assert!(list_3.eq(list_3_expected)?);
+
+        let vec_500: Vec<usize> = (0..500).collect();
+        bench.iter(|| {
+            let list_40 = run_py_list_builder_incomplete(py, black_box(400), black_box(&vec_500)).unwrap();
+            black_box(list_40);
+        });
+        Ok(())
+    }).unwrap();
+}
+
+
+#[bench]
+fn py_list_incomplete_vec(bench: &mut Bencher) {
+    Python::with_gil(|py| {
+        let vec_500: Vec<usize> = (0..500).collect();
+        bench.iter(|| {
+            let py_list = run_py_list_vec_incomplete(py, black_box(400), black_box(&vec_500));
+            black_box(py_list);
+        });
+    });
+}
+
+////////////////////////////
+
+fn run_py_tuple_builder<'py>(py: Python<'py>, input: &[usize]) -> PyResult<&'py PyTuple> {
+    let mut tuple_builder = PyTupleBuilder::with_capacity(py, input.len())?;
+    for i in input {
+        tuple_builder.push(py, get_value(i))?;
+    }
+    tuple_builder.get(py)
+}
+
+fn run_py_tuple_builder_incomplete<'py>(py: Python<'py>, break_at: usize, input: &[usize]) -> PyResult<&'py PyTuple> {
+    let mut tuple_builder = PyTupleBuilder::with_capacity(py, input.len())?;
+    for i in input {
+        tuple_builder.push(py, get_value(i))?;
+        if i >= &break_at {
+            break;
+        }
+    }
+    Ok(tuple_builder.get_incomplete(py))
+}
+
+fn run_py_tuple_vec<'py>(py: Python<'py>, input: &[usize]) -> &'py PyTuple {
+    let mut vec = Vec::with_capacity(input.len());
+    for i in input {
+        vec.push(get_value(i));
+    }
+    PyTuple::new(py, vec)
+}
+
+fn run_py_tuple_vec_incomplete<'py>(py: Python<'py>, break_at: usize, input: &[usize]) -> &'py PyTuple {
+    let mut vec = Vec::with_capacity(input.len());
+    for i in input {
+        vec.push(get_value(i));
+        if i >= &break_at {
+            break;
+        }
+    }
+    PyTuple::new(py, vec)
+}
+
+#[bench]
+fn py_tuple_complete_builder(bench: &mut Bencher) {
+    Python::with_gil(|py| -> PyResult<()> {
+        let vec_5 = vec![0, 1, 2, 3, 4];
+        let tuple_5 = run_py_tuple_builder(py, &vec_5)?;
+        let tuple_5_expected = run_py_tuple_vec(py, &vec_5);
+        assert!(tuple_5.eq(tuple_5_expected)?);
+
+        let vec_500: Vec<usize> = (0..500).collect();
+        bench.iter(|| {
+            let tuple_500 = run_py_tuple_builder(py, black_box(&vec_500)).unwrap();
+            black_box(tuple_500);
+        });
+        Ok(())
+    }).unwrap();
+}
+
+#[bench]
+fn py_tuple_complete_vec(bench: &mut Bencher) {
+    Python::with_gil(|py| {
+        let vec_500: Vec<usize> = (0..500).collect();
+        bench.iter(|| {
+            let py_tuple = run_py_tuple_vec(py, black_box(&vec_500));
+            black_box(py_tuple);
+        });
+    });
+}
+
+
+#[bench]
+fn py_tuple_incomplete_builder(bench: &mut Bencher) {
+    Python::with_gil(|py| -> PyResult<()> {
+        let vec_5 = vec![0, 1, 2, 3, 4];
+        let tuple_3 = run_py_tuple_builder_incomplete(py, 3, &vec_5)?;
+        let tuple_3_expected = run_py_tuple_vec_incomplete(py, 3, &vec_5);
+        assert!(tuple_3.eq(tuple_3_expected)?);
+
+        let vec_500: Vec<usize> = (0..500).collect();
+        bench.iter(|| {
+            let tuple_40 = run_py_tuple_builder_incomplete(py, black_box(400), black_box(&vec_500)).unwrap();
+            black_box(tuple_40);
+        });
+        Ok(())
+    }).unwrap();
+}
+
+#[bench]
+fn py_tuple_incomplete_vec(bench: &mut Bencher) {
+    Python::with_gil(|py| {
+        let vec_500: Vec<usize> = (0..500).collect();
+        bench.iter(|| {
+            let py_tuple = run_py_tuple_vec_incomplete(py, black_box(400), black_box(&vec_500));
+            black_box(py_tuple);
+        });
+    });
+}
+
+#[bench]
+fn list_as_tuple_direct(bench: &mut Bencher) {
+    Python::with_gil(|py| {
+        let vec_5 = vec![0, 1, 2, 3, 4];
+        let py_list_5 = run_py_list_vec(py, &vec_5);
+        let py_tuple_expected = run_py_tuple_vec(py, &vec_5);
+        let py_tuple_5 = list_as_tuple(py, py_list_5);
+        assert!(py_tuple_5.eq(py_tuple_expected).unwrap());
+
+        let vec_500: Vec<usize> = (0..500).collect();
+        let py_list_500 = run_py_list_vec(py, &vec_500);
+
+        bench.iter(|| {
+            let py_tuple = list_as_tuple(py, black_box(py_list_500));
+            black_box(py_tuple);
+        });
+    });
+}
+
+#[bench]
+fn list_as_tuple_iterate(bench: &mut Bencher) {
+    Python::with_gil(|py| {
+        let vec_500: Vec<usize> = (0..500).collect();
+        let py_list_500 = run_py_list_vec(py, &vec_500);
+
+        bench.iter(|| {
+            let py_tuple = PyTuple::new(py, py_list_500);
+            black_box(py_tuple);
+        });
+    });
+}
+
+
+fn run_list_iter(list: &PyList) -> PyResult<Vec<PyObject>> {
+    let mut v = Vec::with_capacity(list.len());
+    for item in list.iter() {
+        v.push(item.to_object(list.py()));
+    }
+    Ok(v)
+}
+
+#[bench]
+fn list_iter(bench: &mut Bencher) {
+    Python::with_gil(|py| {
+        let vec_500: Vec<usize> = (0..500).collect();
+        let list: &PyList = PyList::new(py, vec_500);
+
+        bench.iter(|| {
+            let r = run_list_iter(list).unwrap();
+            black_box(r);
+        });
+    });
+}
+
+fn run_any_list_iter(list: &PyAny, len: usize) -> PyResult<Vec<PyObject>> {
+    let mut v = Vec::with_capacity(len);
+    let py_iterator = list.iter()?;
+    for item_result in py_iterator {
+        let item = item_result?;
+        v.push(item.to_object(list.py()));
+    }
+    Ok(v)
+}
+
+#[bench]
+fn any_list_iter(bench: &mut Bencher) {
+    Python::with_gil(|py| {
+        let vec_500: Vec<usize> = (0..500).collect();
+        let list: &PyList = PyList::new(py, vec_500);
+        let list_any = list as &PyAny;
+
+        bench.iter(|| {
+            let r = run_any_list_iter(list_any, 500).unwrap();
+            black_box(r);
+        });
+    });
+}
+
+
+fn run_iter_list_iter(py_iter: &PyIterator, len: usize) -> PyResult<Vec<PyObject>> {
+    let mut v = Vec::with_capacity(len);
+    for item_result in py_iter {
+        let item = item_result?;
+        v.push(item.to_object(py_iter.py()));
+    }
+    Ok(v)
+}
+
+#[bench]
+fn iter_list_iter(bench: &mut Bencher) {
+    Python::with_gil(|py| {
+        let vec_500: Vec<usize> = (0..500).collect();
+        let list: &PyList = PyList::new(py, vec_500);
+        let iterator: &PyIterator = PyIterator::from_object(py, list).unwrap();
+
+        bench.iter(|| {
+            let r = run_iter_list_iter(iterator, 500).unwrap();
+            black_box(r);
+        });
+    });
+}
+
+#[bench]
+fn extract_str_extract_success(bench: &mut Bencher) {
+    Python::with_gil(|py| {
+        let s = PyString::new(py, "Hello, World!") as &PyAny;
+
+        bench.iter(|| {
+            let v = black_box(s).extract::<&str>().unwrap();
+            black_box(v);
+        });
+    });
+}
+
+#[bench]
+fn extract_str_extract_fail(bench: &mut Bencher) {
+    Python::with_gil(|py| {
+        let d = py.None().into_ref(py);
+
+        bench.iter(|| {
+            match black_box(d).extract::<&str>() {
+                Ok(v) => panic!("should err {}", v),
+                Err(e) => black_box(e),
+            }
+        });
+    });
+}
+
+#[bench]
+fn extract_str_downcast_success(bench: &mut Bencher) {
+    Python::with_gil(|py| {
+        let s = PyString::new(py, "Hello, World!") as &PyAny;
+
+        bench.iter(|| {
+            let py_str = black_box(s).downcast::<PyString>().unwrap();
+            let v = py_str.to_str().unwrap();
+            black_box(v);
+        });
+    });
+}
+
+#[bench]
+fn extract_str_downcast_fail(bench: &mut Bencher) {
+    Python::with_gil(|py| {
+        let d = py.None().into_ref(py);
+
+        bench.iter(|| {
+            match black_box(d).downcast::<PyString>() {
+                Ok(v) => panic!("should err {}", v),
+                Err(e) => black_box(e),
+            }
+        });
+    });
+}
+
+#[bench]
+fn extract_int_extract_success(bench: &mut Bencher) {
+    Python::with_gil(|py| {
+        let int_obj: PyObject = 123.into_py(py);
+        let int = int_obj.as_ref(py);
+
+        bench.iter(|| {
+            let v = black_box(int).extract::<i64>().unwrap();
+            black_box(v);
+        });
+    });
+}
+
+
+#[bench]
+fn extract_int_extract_fail(bench: &mut Bencher) {
+    Python::with_gil(|py| {
+        let d = py.None().into_ref(py);
+
+        bench.iter(|| {
+            match black_box(d).extract::<i64>() {
+                Ok(v) => panic!("should err {}", v),
+                Err(e) => black_box(e),
+            }
+        });
+    });
+}
+
+#[bench]
+fn extract_int_downcast_success(bench: &mut Bencher) {
+    Python::with_gil(|py| {
+        let int_obj: PyObject = 123.into_py(py);
+        let int = int_obj.as_ref(py);
+
+        bench.iter(|| {
+            let py_int = black_box(int).downcast::<PyInt>().unwrap();
+            let v = py_int.extract::<i64>().unwrap();
+            black_box(v);
+        });
+    });
+}
+
+
+#[bench]
+fn extract_int_downcast_fail(bench: &mut Bencher) {
+    Python::with_gil(|py| {
+        let d = py.None().into_ref(py);
+
+        bench.iter(|| {
+            match black_box(d).downcast::<PyInt>() {
+                Ok(v) => panic!("should err {}", v),
+                Err(e) => black_box(e),
+            }
+        });
+    });
+}

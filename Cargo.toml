@@ -3,9 +3,6 @@ name = "rust_bench"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
-pyo3 = {version = "0.16.5", default-features = false, features = ["macros", "auto-initialize"]}
-ahash = "0.8.2"
-nohash-hasher = "0.2.0"
+ahash = "0.8.3"
+pyo3 = {version = "0.18.3", default-features = false, features = ["macros", "auto-initialize"]}
