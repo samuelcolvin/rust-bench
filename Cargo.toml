@@ -4,4 +4,4 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-pyo3 = {version = "0.18.1", default-features = false, features = ["macros", "auto-initialize"]}
+pyo3 = {version = "0.18.3", default-features = false, features = ["macros", "auto-initialize"]}

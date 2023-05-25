@@ -5,13 +5,13 @@ extern crate test;
 use test::{black_box, Bencher};
 
 use pyo3::prelude::*;
-use pyo3::types::{PyList, PyTuple};
+use pyo3::types::{PyInt, PyIterator, PyList, PyString, PyTuple};
 
 use rust_bench::{PyListBuilder, PyTupleBuilder, list_as_tuple};
 
-fn get_value(i: &usize) -> String {
-    format!("value_{}", i)
-    // *i
+fn get_value(i: &usize) -> usize {
+    // format!("value_{}", i)
+    *i
 }
 
 fn run_py_list_builder<'py>(py: Python<'py>, input: &[usize]) -> PyResult<&'py PyList> {
@@ -21,6 +21,15 @@ fn run_py_list_builder<'py>(py: Python<'py>, input: &[usize]) -> PyResult<&'py P
     }
     list_builder.get(py)
 }
+
+fn run_py_list_builder_alt<'py>(py: Python<'py>, input: &[usize]) -> PyResult<&'py PyList> {
+    let mut list_builder = PyListBuilder::with_capacity(py, input.len())?;
+    for i in input {
+        list_builder.push_alt(py , get_value(i))?;
+    }
+    list_builder.get(py)
+}
+
 
 fn run_py_list_builder_incomplete<'py>(py: Python<'py>, break_at: usize, input: &[usize]) -> PyResult<&'py PyList> {
     let mut list_builder = PyListBuilder::with_capacity(py, input.len())?;
@@ -64,6 +73,24 @@ fn py_list_complete_builder(bench: &mut Bencher) {
 
         bench.iter(|| {
             let list_500 = run_py_list_builder(py, black_box(&vec_500)).unwrap();
+            black_box(list_500);
+        });
+        Ok(())
+    }).unwrap();
+}
+
+#[bench]
+fn py_list_complete_builder_alt(bench: &mut Bencher) {
+    Python::with_gil(|py| -> PyResult<()> {
+        let vec_5 = vec![0, 1, 2, 3, 4];
+        let list_5 = run_py_list_builder_alt(py, &vec_5)?;
+        let list_5_expected = run_py_list_vec(py, &vec_5);
+        assert!(list_5.eq(list_5_expected)?);
+
+        let vec_500: Vec<usize> = (0..500).collect();
+
+        bench.iter(|| {
+            let list_500 = run_py_list_builder_alt(py, black_box(&vec_500)).unwrap();
             black_box(list_500);
         });
         Ok(())
@@ -237,6 +264,76 @@ fn list_as_tuple_iterate(bench: &mut Bencher) {
         bench.iter(|| {
             let py_tuple = PyTuple::new(py, py_list_500);
             black_box(py_tuple);
+        });
+    });
+}
+
+
+fn run_list_iter(list: &PyList) -> PyResult<Vec<PyObject>> {
+    let mut v = Vec::with_capacity(list.len());
+    for item in list.iter() {
+        v.push(item.to_object(list.py()));
+    }
+    Ok(v)
+}
+
+#[bench]
+fn list_iter(bench: &mut Bencher) {
+    Python::with_gil(|py| {
+        let vec_500: Vec<usize> = (0..500).collect();
+        let list: &PyList = PyList::new(py, vec_500);
+
+        bench.iter(|| {
+            let r = run_list_iter(list).unwrap();
+            black_box(r);
+        });
+    });
+}
+
+fn run_any_list_iter(list: &PyAny, len: usize) -> PyResult<Vec<PyObject>> {
+    let mut v = Vec::with_capacity(len);
+    let py_iterator = list.iter()?;
+    for item_result in py_iterator {
+        let item = item_result?;
+        v.push(item.to_object(list.py()));
+    }
+    Ok(v)
+}
+
+#[bench]
+fn any_list_iter(bench: &mut Bencher) {
+    Python::with_gil(|py| {
+        let vec_500: Vec<usize> = (0..500).collect();
+        let list: &PyList = PyList::new(py, vec_500);
+        let list_any = list as &PyAny;
+
+        bench.iter(|| {
+            let r = run_any_list_iter(list_any, 500).unwrap();
+            black_box(r);
+        });
+    });
+}
+
+
+fn run_iter_list_iter(py_iter: &PyIterator, len: usize) -> PyResult<Vec<PyObject>> {
+    let mut v = Vec::with_capacity(len);
+    for item_result in py_iter {
+        let item = item_result?;
+        v.push(item.to_object(py_iter.py()));
+    }
+    Ok(v)
+}
+
+#[bench]
+fn iter_list_iter(bench: &mut Bencher) {
+    Python::with_gil(|py| {
+        let vec_500: Vec<usize> = (0..500).collect();
+        let list: &PyList = PyList::new(py, vec_500);
+        let iterator: &PyIterator = PyIterator::from_object(py, list).unwrap();
+
+        bench.iter(|| {
+            let r = run_iter_list_iter(iterator, 500).unwrap();
+            black_box(r);
         });
     });
 }
