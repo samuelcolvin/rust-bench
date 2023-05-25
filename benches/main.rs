@@ -2,12 +2,420 @@
 
 extern crate test;
 
+use std::collections::{BTreeSet, HashSet};
+use std::collections::hash_map::RandomState;
+use std::hash::{BuildHasher, Hash, Hasher};
 use test::{black_box, Bencher};
+use ahash::AHashSet;
 
 use pyo3::prelude::*;
 use pyo3::types::{PyInt, PyIterator, PyList, PyString, PyTuple};
 
 use rust_bench::{PyListBuilder, PyTupleBuilder, list_as_tuple};
+
+
+fn run_startswith_rust(items: &PyList) -> PyResult<i32> {
+    let mut count = 0;
+    for item in items.iter() {
+        let item_cow = item.downcast::<PyString>()?.to_string_lossy();
+        if item_cow.as_ref().starts_with('_') {
+            count += 1;
+        }
+    }
+    Ok(count)
+}
+
+#[bench]
+fn startswith_rust(bench: &mut Bencher) {
+    Python::with_gil(|py| {
+        let items: Vec<PyObject> = (0..100)
+            .map(|i| {
+                if i % 2 == 0 {
+                    i.to_string().to_object(py)
+                } else {
+                    format!("_{}", i).to_object(py)
+                }
+            })
+            .collect();
+        let py_list = PyList::new(py, &items);
+        assert_eq!(run_startswith_rust(py_list).unwrap(), 50);
+
+        bench.iter(|| {
+            black_box(run_startswith_rust(py_list).unwrap());
+        });
+    });
+}
+
+fn run_rust_set_hash_set(to_check: &[i32]) -> i32 {
+    let mut set: HashSet<i32> = HashSet::with_capacity(100);
+    for i in 0..100 {
+        set.insert(i);
+    }
+    let mut count = 0;
+    for i in to_check {
+        if set.contains(i) {
+            count += 1;
+        }
+    }
+    count
+}
+
+#[bench]
+fn rust_set_hash_set(bench: &mut Bencher) {
+    let primes: Vec<i32> = vec![
+        1, 3, 5, 7, 11, 13, 1779, 83, 89, 97, 101, 103, 107, 109, 111, 199,
+    ];
+    assert_eq!(run_rust_set_hash_set(&primes), 9);
+
+    bench.iter(|| {
+        black_box(run_rust_set_hash_set(black_box(&primes)));
+    });
+}
+
+fn run_rust_set_btree_set(to_check: &[i32]) -> i32 {
+    let mut set: BTreeSet<i32> = BTreeSet::new();
+    for i in 0..100 {
+        set.insert(i);
+    }
+    let mut count = 0;
+    for i in to_check {
+        if set.contains(i) {
+            count += 1;
+        }
+    }
+    count
+}
+
+#[bench]
+fn rust_set_btree_set(bench: &mut Bencher) {
+    let primes: Vec<i32> = vec![
+        1, 3, 5, 7, 11, 13, 1779, 83, 89, 97, 101, 103, 107, 109, 111, 199,
+    ];
+    assert_eq!(run_rust_set_btree_set(&primes), 9);
+
+    bench.iter(|| {
+        black_box(run_rust_set_btree_set(black_box(&primes)));
+    });
+}
+
+fn run_rust_set_a_hash_set(to_check: &[i32]) -> i32 {
+    let mut set: AHashSet<i32> = AHashSet::with_capacity(100);
+    for i in 0..100 {
+        set.insert(i);
+    }
+    let mut count = 0;
+    for i in to_check {
+        if set.contains(i) {
+            count += 1;
+        }
+    }
+    count
+}
+
+#[bench]
+fn rust_set_a_hash_set(bench: &mut Bencher) {
+    let primes: Vec<i32> = vec![
+        1, 3, 5, 7, 11, 13, 1779, 83, 89, 97, 101, 103, 107, 109, 111, 199,
+    ];
+    assert_eq!(run_rust_set_a_hash_set(&primes), 9);
+
+    bench.iter(|| {
+        black_box(run_rust_set_a_hash_set(black_box(&primes)));
+    });
+}
+
+fn run_extract_string(py_any: &PyAny) -> bool {
+    let str: String = py_any.extract().unwrap();
+    return str == "foobar"
+}
+
+#[bench]
+fn extract_string(bench: &mut Bencher) {
+    Python::with_gil(|py| {
+        let py_any: &PyAny = PyString::new(py, "foobar");
+        bench.iter(|| {
+            black_box(run_extract_string(black_box(py_any)));
+        });
+    });
+}
+
+fn run_to_string_lossy(py_any: &PyAny) -> bool {
+    let py_str: &PyString = py_any.downcast().unwrap();
+    let str = py_str.to_string_lossy();
+    return str.as_ref() == "foobar"
+}
+
+#[bench]
+fn to_string_lossy(bench: &mut Bencher) {
+    Python::with_gil(|py| {
+        let py_any: &PyAny = PyString::new(py, "foobar");
+        bench.iter(|| {
+            black_box(run_to_string_lossy(black_box(py_any)));
+        });
+    });
+}
+
+fn run_to_str(py_any: &PyAny) -> bool {
+    let py_str: &PyString = py_any.downcast().unwrap();
+    let str = py_str.to_str().unwrap();
+    return str == "foobar"
+}
+
+#[bench]
+fn to_str(bench: &mut Bencher) {
+    Python::with_gil(|py| {
+        let py_any: &PyAny = PyString::new(py, "foobar");
+        bench.iter(|| {
+            black_box(run_to_str(black_box(py_any)));
+        });
+    });
+}
+
+fn run_is_str_cast_as(py_any: &PyAny) -> Option<String> {
+    if let Ok(py_str) = py_any.downcast::<PyString>() {
+        Some(py_str.to_str().unwrap().to_string())
+    } else {
+        None
+    }
+}
+
+#[bench]
+fn is_str_cast_as(bench: &mut Bencher) {
+    Python::with_gil(|py| {
+        let py_any_str: &PyAny = PyString::new(py, "foobar");
+        let py_int = 123.to_object(py);
+        let py_any_int: &PyAny = py_int.extract(py).unwrap();
+        bench.iter(|| {
+            black_box(run_is_str_cast_as(black_box(py_any_str)));
+            black_box(run_is_str_cast_as(black_box(py_any_int)));
+        });
+    });
+}
+
+fn run_is_str_extract(py_any: &PyAny) -> Option<String> {
+    if let Ok(str) = py_any.extract::<String>() {
+        Some(str)
+    } else {
+        None
+    }
+}
+
+#[bench]
+fn is_str_extract(bench: &mut Bencher) {
+    Python::with_gil(|py| {
+        let py_any_str: &PyAny = PyString::new(py, "foobar");
+        let py_int = 123.to_object(py);
+        let py_any_int: &PyAny = py_int.extract(py).unwrap();
+        bench.iter(|| {
+            black_box(run_is_str_extract(black_box(py_any_str)));
+            black_box(run_is_str_extract(black_box(py_any_int)));
+        });
+    });
+}
+
+fn run_instantiation_tuple<'py>(py: Python<'py>, things: &[&PyAny]) -> &'py PyTuple {
+    PyTuple::new(py, things)
+}
+
+#[bench]
+fn instantiation_tuple(bench: &mut Bencher) {
+    Python::with_gil(|py| {
+        let vec: Vec<&PyAny> = (0..100).map(|i| PyString::new(py, &i.to_string()) as &PyAny).collect();
+
+        for _ in 0..100 {
+            black_box(run_instantiation_tuple(black_box(py), black_box(&vec)));
+        }
+
+        bench.iter(|| {
+            black_box(run_instantiation_tuple(black_box(py), black_box(&vec)));
+        });
+    });
+}
+
+
+fn run_instantiation_list<'py>(py: Python<'py>, things: &[&PyAny]) -> &'py PyList {
+    PyList::new(py, things)
+}
+
+#[bench]
+fn instantiation_list(bench: &mut Bencher) {
+    Python::with_gil(|py| {
+        let vec: Vec<&PyAny> = (0..100).map(|i| PyString::new(py, &i.to_string()) as &PyAny).collect();
+
+        for _ in 0..100 {
+            black_box(run_instantiation_list(black_box(py), black_box(&vec)));
+        }
+
+        bench.iter(|| {
+            black_box(run_instantiation_list(black_box(py), black_box(&vec)));
+        });
+    });
+}
+
+fn int_run_vec_contains(vec: &[i64], item: i64) -> bool {
+    vec.contains(&item)
+}
+
+#[bench]
+fn int_vec_contains(bench: &mut Bencher) {
+    let vec: Vec<i64> = (0..5).collect();
+
+    assert!(int_run_vec_contains(black_box(&vec), black_box(3)));
+    assert!(!int_run_vec_contains(black_box(&vec), black_box(5)));
+
+    bench.iter(|| {
+        black_box(int_run_vec_contains(black_box(&vec), black_box(0)));
+        black_box(int_run_vec_contains(black_box(&vec), black_box(1)));
+        black_box(int_run_vec_contains(black_box(&vec), black_box(2)));
+        black_box(int_run_vec_contains(black_box(&vec), black_box(3)));
+        black_box(int_run_vec_contains(black_box(&vec), black_box(4)));
+        black_box(int_run_vec_contains(black_box(&vec), black_box(5)));
+        black_box(int_run_vec_contains(black_box(&vec), black_box(6)));
+        black_box(int_run_vec_contains(black_box(&vec), black_box(7)));
+        black_box(int_run_vec_contains(black_box(&vec), black_box(8)));
+    });
+}
+
+fn int_run_aset_contains(set: &AHashSet<i64>, item: i64) -> bool {
+    set.contains(&item)
+}
+
+#[bench]
+fn int_aset_contains(bench: &mut Bencher) {
+    let mut set: AHashSet<i64> = AHashSet::with_capacity(5);
+    for i in 0..5 {
+        set.insert(i);
+    }
+
+    assert!(int_run_aset_contains(black_box(&set), black_box(3)));
+    assert!(!int_run_aset_contains(black_box(&set), black_box(6)));
+
+    bench.iter(|| {
+        black_box(int_run_aset_contains(black_box(&set), black_box(0)));
+        black_box(int_run_aset_contains(black_box(&set), black_box(1)));
+        black_box(int_run_aset_contains(black_box(&set), black_box(2)));
+        black_box(int_run_aset_contains(black_box(&set), black_box(3)));
+        black_box(int_run_aset_contains(black_box(&set), black_box(4)));
+        black_box(int_run_aset_contains(black_box(&set), black_box(5)));
+        black_box(int_run_aset_contains(black_box(&set), black_box(6)));
+        black_box(int_run_aset_contains(black_box(&set), black_box(7)));
+        black_box(int_run_aset_contains(black_box(&set), black_box(8)));
+    });
+}
+
+
+fn str_run_vec_contains(vec: &[String], item: &str) -> bool {
+    vec.iter().any(|s| s.as_str() == item)
+}
+
+#[bench]
+fn str_vec_contains(bench: &mut Bencher) {
+    let mut vec: Vec<String> = Vec::with_capacity(5);
+    for i in 0..5 {
+        vec.push(format!("number {}", i));
+    }
+
+    assert!(str_run_vec_contains(black_box(&vec), black_box("number 2")));
+    assert!(!str_run_vec_contains(black_box(&vec), black_box("number 5")));
+
+    bench.iter(|| {
+        black_box(str_run_vec_contains(black_box(&vec), black_box("number 0")));
+        black_box(str_run_vec_contains(black_box(&vec), black_box("number 1")));
+        black_box(str_run_vec_contains(black_box(&vec), black_box("number 2")));
+        black_box(str_run_vec_contains(black_box(&vec), black_box("number 3")));
+        black_box(str_run_vec_contains(black_box(&vec), black_box("number 4")));
+        black_box(str_run_vec_contains(black_box(&vec), black_box("number 5")));
+        black_box(str_run_vec_contains(black_box(&vec), black_box("number 6")));
+        black_box(str_run_vec_contains(black_box(&vec), black_box("number 7")));
+        black_box(str_run_vec_contains(black_box(&vec), black_box("number 8")));
+    });
+}
+
+fn str_run_set_contains(set: &AHashSet<String>, item: &str) -> bool {
+    set.contains(item)
+}
+
+#[bench]
+fn str_set_contains(bench: &mut Bencher) {
+    let mut set: AHashSet<String> = AHashSet::with_capacity(5);
+    for i in 0..5 {
+        set.insert(format!("number {}", i));
+    }
+
+    assert!(str_run_set_contains(black_box(&set), black_box("number 3")));
+    assert!(!str_run_set_contains(black_box(&set), black_box("number 6")));
+
+    bench.iter(|| {
+        black_box(str_run_set_contains(black_box(&set), black_box("number 0")));
+        black_box(str_run_set_contains(black_box(&set), black_box("number 1")));
+        black_box(str_run_set_contains(black_box(&set), black_box("number 2")));
+        black_box(str_run_set_contains(black_box(&set), black_box("number 3")));
+        black_box(str_run_set_contains(black_box(&set), black_box("number 4")));
+        black_box(str_run_set_contains(black_box(&set), black_box("number 5")));
+        black_box(str_run_set_contains(black_box(&set), black_box("number 6")));
+        black_box(str_run_set_contains(black_box(&set), black_box("number 7")));
+        black_box(str_run_set_contains(black_box(&set), black_box("number 8")));
+    });
+}
+
+
+struct HashVec {
+    vec: Vec<u64>,
+    hash_builder: RandomState,
+}
+
+impl HashVec {
+    fn new(capacity: usize) -> HashVec {
+        HashVec {
+            vec: Vec::with_capacity(capacity),
+            hash_builder: RandomState::new(),
+        }
+    }
+
+    fn push(&mut self, item: &str) {
+        self.vec.push(self.hash(item));
+    }
+
+    fn contains(&self, item: &str) -> bool {
+        self.vec.contains(&self.hash(item))
+    }
+
+    fn hash(&self, item: &str) -> u64 {
+        // let hash = self.hash_builder.hash_one(item);
+        let mut hasher = self.hash_builder.build_hasher();
+        item.hash(&mut hasher);
+        hasher.finish()
+    }
+}
+
+
+fn str_run_hashvec_contains(hashvec: &HashVec, item: &str) -> bool {
+    hashvec.contains(item)
+}
+
+#[bench]
+fn str_hashvec_contains(bench: &mut Bencher) {
+    let mut v: HashVec = HashVec::new(5);
+    for i in 0..5 {
+        v.push(&format!("number {}", i));
+    }
+
+    assert!(str_run_hashvec_contains(black_box(&v), black_box("number 3")));
+    assert!(!str_run_hashvec_contains(black_box(&v), black_box("number 6")));
+
+    bench.iter(|| {
+        black_box(str_run_hashvec_contains(black_box(&v), black_box("number 0")));
+        black_box(str_run_hashvec_contains(black_box(&v), black_box("number 1")));
+        black_box(str_run_hashvec_contains(black_box(&v), black_box("number 2")));
+        black_box(str_run_hashvec_contains(black_box(&v), black_box("number 3")));
+        black_box(str_run_hashvec_contains(black_box(&v), black_box("number 4")));
+        black_box(str_run_hashvec_contains(black_box(&v), black_box("number 5")));
+        black_box(str_run_hashvec_contains(black_box(&v), black_box("number 6")));
+        black_box(str_run_hashvec_contains(black_box(&v), black_box("number 7")));
+        black_box(str_run_hashvec_contains(black_box(&v), black_box("number 8")));
+    });
+}
+
 
 fn get_value(i: &usize) -> usize {
     // format!("value_{}", i)
