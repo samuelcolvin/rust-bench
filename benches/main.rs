@@ -9,7 +9,8 @@ use test::{black_box, Bencher};
 use ahash::AHashSet;
 
 use pyo3::prelude::*;
-use pyo3::types::{PyInt, PyIterator, PyList, PyString, PyTuple};
+use pyo3::PyTypeInfo;
+use pyo3::types::{PyBool, PyFloat, PyInt, PyIterator, PyList, PyString, PyTuple};
 
 use rust_bench::{PyListBuilder, PyTupleBuilder, list_as_tuple};
 
@@ -852,6 +853,190 @@ fn extract_int_downcast_fail(bench: &mut Bencher) {
                 Ok(v) => panic!("should err {}", v),
                 Err(e) => black_box(e),
             }
+        });
+    });
+}
+
+#[bench]
+fn extract_int_is_instance_success(bench: &mut Bencher) {
+    Python::with_gil(|py| {
+        let int_obj: PyObject = 123.into_py(py);
+        let int = int_obj.as_ref(py);
+
+        bench.iter(|| {
+            let input = black_box(int);
+            let v = match PyInt::is_type_of(input) {
+                true => input.extract::<i64>().unwrap(),
+                false => panic!("not instance of int {}", input),
+            };
+            black_box(v);
+        });
+    });
+}
+
+
+#[bench]
+fn extract_int_is_instance_fail(bench: &mut Bencher) {
+    Python::with_gil(|py| {
+        let d = py.None().into_ref(py);
+
+        bench.iter(|| {
+            let input = black_box(d);
+            match PyInt::is_type_of(input) {
+                true => panic!("should err {}", input),
+                false => black_box(false),
+            }
+        });
+    });
+}
+
+///////////////////////////
+
+#[bench]
+fn extract_float_extract_success(bench: &mut Bencher) {
+    Python::with_gil(|py| {
+        let float_obj: PyObject = 123.0.into_py(py);
+        let float = float_obj.as_ref(py);
+
+        bench.iter(|| {
+            let v = black_box(float).extract::<f64>().unwrap();
+            black_box(v);
+        });
+    });
+}
+
+
+#[bench]
+fn extract_float_extract_fail(bench: &mut Bencher) {
+    Python::with_gil(|py| {
+        let d = py.None().into_ref(py);
+
+        bench.iter(|| {
+            match black_box(d).extract::<f64>() {
+                Ok(v) => panic!("should err {}", v),
+                Err(e) => black_box(e),
+            }
+        });
+    });
+}
+
+#[bench]
+fn extract_float_downcast_success(bench: &mut Bencher) {
+    Python::with_gil(|py| {
+        let float_obj: PyObject = 123.0.into_py(py);
+        let float = float_obj.as_ref(py);
+
+        bench.iter(|| {
+            let py_float = black_box(float).downcast::<PyFloat>().unwrap();
+            let v = py_float.extract::<f64>().unwrap();
+            black_box(v);
+        });
+    });
+}
+
+#[bench]
+fn extract_float_downcast_fail(bench: &mut Bencher) {
+    Python::with_gil(|py| {
+        let d = py.None().into_ref(py);
+
+        bench.iter(|| {
+            match black_box(d).downcast::<PyFloat>() {
+                Ok(v) => panic!("should err {}", v),
+                Err(e) => black_box(e),
+            }
+        });
+    });
+}
+
+#[bench]
+fn extract_float_isinstance_success(bench: &mut Bencher) {
+    Python::with_gil(|py| {
+        let float_obj: PyObject = 123.0.into_py(py);
+        let float = float_obj.as_ref(py);
+
+        bench.iter(|| {
+            let input = black_box(float);
+            let v = match PyFloat::is_type_of(input) {
+                true => input.extract::<f64>().unwrap(),
+                false => panic!("not instance of float {}", input),
+            };
+            black_box(v);
+        });
+    });
+}
+
+///////////////////////// bool
+
+
+#[bench]
+fn extract_bool_extract_success(bench: &mut Bencher) {
+    Python::with_gil(|py| {
+        let bool_obj: PyObject = true.into_py(py);
+        let b = bool_obj.as_ref(py);
+
+        bench.iter(|| {
+            let v = black_box(b).extract::<bool>().unwrap();
+            black_box(v);
+        });
+    });
+}
+
+
+#[bench]
+fn extract_bool_extract_fail(bench: &mut Bencher) {
+    Python::with_gil(|py| {
+        let d = py.None().into_ref(py);
+
+        bench.iter(|| {
+            match black_box(d).extract::<bool>() {
+                Ok(v) => panic!("should err {}", v),
+                Err(e) => black_box(e),
+            }
+        });
+    });
+}
+
+#[bench]
+fn extract_bool_downcast_success(bench: &mut Bencher) {
+    Python::with_gil(|py| {
+        let bool_obj: PyObject = true.into_py(py);
+        let b = bool_obj.as_ref(py);
+
+        bench.iter(|| {
+            let py_bool = black_box(b).downcast::<PyBool>().unwrap();
+            let v = py_bool.is_true();
+            black_box(v);
+        });
+    });
+}
+
+#[bench]
+fn extract_bool_downcast_fail(bench: &mut Bencher) {
+    Python::with_gil(|py| {
+        let d = py.None().into_ref(py);
+
+        bench.iter(|| {
+            match black_box(d).downcast::<PyBool>() {
+                Ok(v) => panic!("should err {}", v),
+                Err(e) => black_box(e),
+            }
+        });
+    });
+}
+
+#[bench]
+fn extract_bool_isinstance_success(bench: &mut Bencher) {
+    Python::with_gil(|py| {
+        let bool_obj: PyObject = true.into_py(py);
+        let b = bool_obj.as_ref(py);
+
+        bench.iter(|| {
+            let input = black_box(b);
+            let v = match PyBool::is_type_of(input) {
+                true => input.is_true().unwrap(),
+                false => panic!("not instance of bool {}", input),
+            };
+            black_box(v);
         });
     });
 }
